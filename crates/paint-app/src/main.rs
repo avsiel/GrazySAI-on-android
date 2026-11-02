@@ -665,7 +665,7 @@ struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { dbl_props: true, swap_zoom: false, size_relative: false, spring_tools: false, spring_color: false, spring_funcs: false, spring_ms: 250, duplex_revert: false, move_guard_ms: 300, history_mb: 1024, recovery_min: 3, pressure_curve: paint_core::curve::PressureCurve::default(), popup_palette: false, psd16: false, psd_exact: false, min_pressure: 0.0, wintab: false, renderer_wgpu: false, btn_middle: 1, btn_right: 0 }
+        Self { dbl_props: true, swap_zoom: false, size_relative: false, spring_tools: false, spring_color: false, spring_funcs: false, spring_ms: 250, duplex_revert: false, move_guard_ms: 300, history_mb: 1024, recovery_min: 3, pressure_curve: paint_core::curve::PressureCurve::default(), popup_palette: false, psd16: false, psd_exact: false, min_pressure: 0.0, wintab: false, renderer_wgpu: true, btn_middle: 1, btn_right: 0 }
     }
 }
 
@@ -2228,7 +2228,7 @@ app.open_canvas_dialog(d == "resolution")
         if let Some(v) = s.f32("opt.btn_right") {
             o.btn_right = (v as u8).min(4);
         }
-        o.renderer_wgpu = s.str("renderer") == Some("wgpu");
+        o.renderer_wgpu = s.str("renderer_v2") != Some("glow");
         if let Some(v) = s.bool("opt.wintab") {
             o.wintab = v;
         }
@@ -2456,7 +2456,7 @@ app.open_canvas_dialog(d == "resolution")
         s.set("opt.pressure_curve", format!("{x1:.3},{y1:.3},{x2:.3},{y2:.3}"));
         s.set("opt.min_pressure", o.min_pressure);
         s.set("opt.wintab", o.wintab as u8);
-        s.set("renderer", if o.renderer_wgpu { "wgpu" } else { "glow" });
+        s.set("renderer_v2", if o.renderer_wgpu { "wgpu" } else { "glow" });
         s.set("opt.btn_middle", o.btn_middle);
         s.set("opt.btn_right", o.btn_right);
         s.set("layers_right", w.layers_right as u8);
@@ -14035,20 +14035,21 @@ fn main() -> eframe::Result {
         .or_else(|| settings::Settings::load().str("lang").map(str::to_string))
         .unwrap_or_else(|| i18n::system().to_string());
     i18n::set(&lang);
-    // отрисовка: OpenGL (по умолчанию) или wgpu — Vulkan, DirectX 12, Metal; выбор в настройках,
+    // отрисовка: wgpu (по умолчанию) — Vulkan, DirectX 12, Metal — или OpenGL; выбор в настройках,
+    // ключ renderer_v2: старый renderer записан «glow» у всех, кто ничего не выбирал;
     // `PAINT_RENDERER=wgpu|glow` — для проверок. wgpu не поднялся — запуск заново через OpenGL.
     use settings::SettingsFile;
     let forced = std::env::var("PAINT_RENDERER").ok();
-    let wanted = forced.clone().or_else(|| settings::Settings::load().str("renderer").map(str::to_string));
+    let wanted = forced.clone().or_else(|| settings::Settings::load().str("renderer_v2").map(str::to_string)).unwrap_or_else(|| "wgpu".to_string());
     // Метка на время первых кадров: если wgpu уронит программу при запуске, следующий запуск
     // увидит метку и вернётся к OpenGL — иначе галочку было бы негде снять.
     let marker = settings::dir().filter(|_| forced.is_none()).map(|d| d.join("wgpu-starting"));
     let back_to_opengl = || {
         let mut s = settings::Settings::load();
-        s.set("renderer", "glow");
+        s.set("renderer_v2", "glow");
         s.save();
     };
-    if wanted.as_deref() == Some("wgpu") {
+    if wanted == "wgpu" {
         if marker.as_ref().is_some_and(|m| m.exists()) {
             eprintln!("прошлый запуск через wgpu не удался, отрисовка через OpenGL");
             if let Some(m) = &marker {
@@ -14067,6 +14068,12 @@ fn main() -> eframe::Result {
                     }
                     if forced.is_none() {
                         back_to_opengl();
+                        // winit не создаёт цикл событий второй раз в одном процессе — новый запуск
+                        if let Ok(exe) = std::env::current_exe() {
+                            if std::process::Command::new(exe).args(std::env::args_os().skip(1)).spawn().is_ok() {
+                                return Ok(());
+                            }
+                        }
                     }
                 }
                 ok => return ok,
