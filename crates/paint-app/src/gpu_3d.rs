@@ -305,9 +305,11 @@ mod tests {
     use paint_3d::scene::Object;
 
     fn gpu() -> Option<gpu_filter::Gpu> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..Default::default() });
         let name = std::env::var("PAINT_GPU_TEST_NAME").unwrap_or_default();
-        let adapter = instance.enumerate_adapters(wgpu::Backends::PRIMARY).into_iter().find(|a| a.get_info().name.contains(&name))?;
+        let adapter = instance.enumerate_adapters(backends).into_iter().find(|a| a.get_info().name.contains(&name))?;
+        eprintln!("устройство: {} ({:?})", adapter.get_info().name, adapter.get_info().backend);
         let (d, q) = pollster::block_on(adapter.request_device(&Default::default(), None)).ok()?;
         Some(gpu_filter::Gpu { device: Arc::new(d), queue: Arc::new(q), pipelines: Arc::default() })
     }

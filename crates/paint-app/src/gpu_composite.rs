@@ -69,11 +69,10 @@ fn channel(m: u32, b: f32, s: f32) -> f32 {
             if (s <= 0.5) { return min(b, 2.0 * s); }
             return max(b, 2.0 * s - 1.0);
         }
-        default: {
-            if (b + s >= 1.0) { return 1.0; }
-            return 0.0;
-        }
+        default: {}
     }
+    if (b + s >= 1.0) { return 1.0; }
+    return 0.0;
 }
 fn lum(c: vec3<f32>) -> f32 { return 0.30 * c.r + 0.59 * c.g + 0.11 * c.b; }
 fn composite(m: u32, dst: vec4<f32>, src: vec4<f32>, op: f32) -> vec4<f32> {
@@ -470,12 +469,13 @@ mod tests {
     use paint_core::{blend::BlendMode, layer::Layer, pixel::from_rgba8};
 
     fn composer() -> Option<Composer> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..Default::default() });
         let name = std::env::var("PAINT_GPU_TEST_NAME").unwrap_or_default();
-        let adapter = instance.enumerate_adapters(wgpu::Backends::PRIMARY).into_iter().find(|a| a.get_info().name.contains(&name))?;
-        eprintln!("устройство: {}", adapter.get_info().name);
+        let adapter = instance.enumerate_adapters(backends).into_iter().find(|a| a.get_info().name.contains(&name))?;
+        eprintln!("устройство: {} ({:?})", adapter.get_info().name, adapter.get_info().backend);
         let (d, q) = pollster::block_on(adapter.request_device(&Default::default(), None)).ok()?;
-        Composer::new(std::sync::Arc::new(d), std::sync::Arc::new(q), 16)
+        Some(Composer::new(std::sync::Arc::new(d), std::sync::Arc::new(q), 16).expect("шейдер собирается"))
     }
 
     fn layer(seed: i32, w: i32, h: i32, mode: BlendMode, opacity: f32) -> Layer {
