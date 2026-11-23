@@ -1,117 +1,116 @@
-# GrazySAI
+# GrazySAI для Android
 
-**English** | [Русский](README.ru.md)
+**Русский** | [English](README.en.md)
 
-**A free painting program for drawing and animation, with a feel and a brush engine modelled
-on PaintTool SAI 2.** It runs on Windows and Linux (and FreeBSD), works with graphics tablets and opens
-`.sai2` files. Version 1.4.6.
+**Свободная программа для рисования и анимации на телефоне и планшете: движок кистей в духе
+PaintTool SAI 2, полный интерфейс настольной GrazySAI, работа со стилусом и файлы `.sai2`.**
+Это перенос редактора GrazySAI ([grazyping/GrazySAI](https://github.com/grazyping/GrazySAI),
+версия движка 1.4.6) на Android: тот же Rust-код, тот же интерфейс, но с мобильной раскладкой.
 
-![GrazySAI: the painting window with the navigator, color wheel, layers and tools](docs/screenshot.png)
+![GrazySAI на Android](docs/screenshot.png)
 
-## Try it in a minute
+## Попробовать за минуту
 
-1. Open the [**Releases**](https://github.com/grazyping/GrazySAI/releases/latest) page and download the archive for your system.
-2. Unpack it and run the program. Nothing needs to be installed.
-   - **Windows**: `GrazySAI-…-windows-x86_64.zip` → `GrazySAI.exe` (Windows 7 and 8 have their own archive).
-   - **Linux**: `GrazySAI-…-linux-x86_64.tar.gz` → `./GrazySAI`.
-   - **FreeBSD**: a `.pkg` package or an archive.
-3. Draw. To open a drawing, drop the file onto the window.
+1. Откройте [**Releases**](https://github.com/avsiel/GrazySAI-on-android/releases/latest) и скачайте
+   `GrazySAI-<версия>-android-arm64-v8a.apk`.
+2. Разрешите файловому менеджеру или браузеру установку приложений из неизвестных источников
+   и установите APK.
+3. Запустите и рисуйте. Чтобы открыть рисунок, используйте встроенный проводник (FileViewer в духе SAI).
 
-The program updates itself from GitHub: a quiet notice appears in the menu bar when a new version is out.
-The interface speaks 10 languages and picks yours automatically.
+Нужен Android 7.0+ (minSdk 24) и процессор **arm64-v8a**. APK весит около 48 МБ: внутри
+полный нативный движок.
 
-## What you can do
+## Что умеет
 
-**Paint**
-- Brushes that behave like SAI's: pencil, airbrush, brush, watercolor, marker, eraser. They
-  mix paint with the canvas — blending, dilution, persistence. A stabilizer for smooth lines.
-- Layers with folders, clipping, masks, all 28 blend modes, paper texture, layer effects
-  (Fringe, Binary Color) and layer styles (stroke, shadow, glow).
-- Selections (rectangle, lasso, magic wand), transformation, bucket fill, filters, rulers
-  (line, ellipse), curves and shapes on linework layers, text layers.
-- A library of brushes with your own shapes and textures; brushes from SAI 2, Photoshop, Krita
-  and Clip Studio can be imported. A separate **brush workshop** program (`GrazySAI-Studio`)
-  helps to design brushes and plugins.
+Всё, что умеет настольная GrazySAI, — перечень ниже одинаков для обеих версий.
 
-**Animate**
-- A timeline with animation folders and cels, onion skin, playback, and export to GIF, APNG,
-  PNG frames and MP4.
-- **Puppet** animation like After Effects: pin a picture and drag it, the whole mesh follows.
-  Pins get keys on the timeline.
+**Рисовать**
+- Кисти, которые ведут себя как в SAI: карандаш, аэрограф, кисть, акварель, маркер, ластик.
+  Они смешивают краску с холстом — смешивание, разбавление, «устойчивость». Стабилизатор
+  линий, тонкие штрихи.
+- Слои с папками, обрезкой, масками, всеми 28 режимами наложения, текстурой бумаги, эффектами
+  слоя (Fringe, Binary Color) и стилями (обводка, тень, свечение).
+- Выделения (прямоугольник, лассо, волшебная палочка), трансформация, заливка, фильтры,
+  линейки (линия, эллипс), кривые и фигуры на слоях linework, текстовые слои.
+- Библиотека кистей со своими формами и текстурами; кисти из SAI 2, Photoshop, Krita и
+  Clip Studio можно импортировать.
 
-**Work with 3D**
-- 3D layers from glTF, VRM, OBJ, FBX, PMX and COLLADA models, with poses, camera and
-  conversion to lines for tracing.
+**Анимировать**
+- Таймлайн с анимационными папками и целлами, onion skin, воспроизведение, экспорт в GIF,
+  APNG, PNG-кадры и MP4.
+- **Кукольная анимация** как в After Effects: закрепите рисунок и тяните — сетка следует за ним.
 
-**Make the window yours**
-- Panels that dock like in Clip Studio (“Window → Dockable panels”), workspaces,
-  command search (Ctrl+Shift+P), a quick-access bar, your own shortcuts and pen buttons,
-  auto actions (record a sequence of commands and replay it with one button).
+**Работать с 3D**
+- 3D-слои из glTF, VRM, OBJ, FBX, PMX и COLLADA: позы, камера и перевод в контуры для обводки.
 
-**Exchange files**
-- Reads and writes `.sai2` (SAI 2 opens these files too), PSD and PSB with layers,
-  OpenRaster, PNG, JPEG, WebP, TIFF, BMP, TGA and QOI.
-- **GrazySAI Convert** (`GrazySAI-Convert`) converts whole batches of pictures and 3D models
-  from one format to another.
+**Настраивать окно**
+- Доки-панели как в Clip Studio, рабочие пространства, поиск команд (Ctrl+Shift+P), панель
+  быстрого доступа, свои горячие клавиши и кнопки пера, авто-действия.
 
-**Tablets**: pen pressure, tilt and rotation work on Linux (XInput 2) and Windows (Windows Ink,
-WinTab). A virtual pen and tablet are included for testing without hardware.
+**Обмениваться файлами**
+- Чтение и запись `.sai2` (SAI 2 открывает эти файлы), PSD и PSB со слоями, OpenRaster, PNG,
+  JPEG, WebP, TIFF, BMP, TGA и QOI.
 
-## Learn more
+## Что особенного в Android-версии
 
-- [**Manual**](docs/manual.en.md) — how to use everything above.
-- [**Roadmap**](ROADMAP.en.md) — what is done and what comes next, and the
-  [Milestones](https://github.com/grazyping/GrazySAI/milestones) tab.
-- Found a bug or want a feature? Open an [issue](https://github.com/grazyping/GrazySAI/issues).
-  A short description and, if you can, the file that shows the problem help most.
-- Translations are plain text files in `crates/paint-app/lang/` (see below).
+- **Полный интерфейс, а не просмотрщик.** `paint-app` запускается внутри `android.app.NativeActivity`
+  (Rust + winit + egui), поэтому на телефоне доступны кисти, слои, таймлайн, 3D и настройки.
+- **Мобильная раскладка:** полноэкранный режим с корректными системными отступами, адаптивные
+  панели, масштаб интерфейса 75–250% независимо от системного.
+- **Стилус:** давление из `MotionEvent.getPressure()`, наклон и ориентация из `MotionEvent`
+  (проверено на Lenovo Precision Pen 3). Отладка давления — в logcat по строке
+  `GrazySAI: paint_app: давление: force=...`.
+- **Файлы:** встроенный FileViewer работает с `/sdcard` (`Download`, `Pictures`, `Documents`, `DCIM`)
+  через `MANAGE_EXTERNAL_STORAGE` на Android 11+. Без этого разрешения доступна только папка
+  приложения.
 
-The documents in `docs/` other than the manual are written in Russian.
+## Ограничения
 
-## Building from source
+- APK пока подписан **debug-ключом** из Android SDK. Ставьте обновления только поверх сборок
+  с тем же ключом; магазинная подпись появится позже.
+- Собирается только под `arm64-v8a` (все актуальные телефоны и планшеты). `armeabi-v7a` и
+  `x86_64` не поставляются.
+- Версия 0.1.0 — ранняя: мобильный UI ещё шлифуется, падения возможны. Пишите в
+  [Issues](https://github.com/avsiel/GrazySAI-on-android/issues): короткое описание и, если можно,
+  файл, на котором видно проблему, помогают больше всего.
 
-```bash
-cargo build --release -p paint-app      # editor: target/release/GrazySAI [file.sai2]
-cargo build --release -p paint-studio   # brush workshop
-cargo build --release -p paint-convert  # converter
-cargo build --release -p paint-cli      # command line: comparisons, rendering, .sai2 inspection
-cargo test --workspace --release
+## Сборка APK
+
+Нужны Rust с `cargo-ndk`, Android SDK (build-tools, platform android-34) и NDK. Всё делает скрипт:
+
+```powershell
+.\android\build_apk.ps1                    # arm64-v8a, подпись debug-ключом
+.\android\build_apk.ps1 -SkipRust          # только упаковка уже собранных библиотек
 ```
 
-Windows build from Linux: target `x86_64-pc-windows-gnullvm`, linker llvm-mingw (path in
-`.cargo/config.toml` — adjust it for your machine).
+Скрипт выполняет `cargo ndk build --release -p paint-android-full`, затем `aapt2` → `zipalign`
+→ `apksigner` и оставляет `GrazySAI-android.apk` в корне репозитория.
 
-Tests that use the author's sample files look for them in `~/SAI2` (or in `SAI2_SAMPLES`); if
-the files are missing, those tests are skipped.
+Подробности архитектуры (какие крейты, зачем пропатчены `winit`, `rfd`, `arboard`) —
+в [`android/README.md`](android/README.md).
 
-## Translations
+## Из чего состоит проект
 
-Each language is a plain text file `crates/paint-app/lang/<code>.txt` with lines
-`Russian source text = translation`; `{0}`, `{1}` are values inserted by the program. The test
-`every_key_is_translated` (`cargo test -p paint-app`) checks that every interface string has a
-translation in every file. Corrections and new languages are welcome as pull requests.
-
-## Project layout
-
-| Directory | What |
+| Каталог | Что |
 |---|---|
-| `crates/paint-core` | Pixels, tiles, layers, blending, brush engine, strokes, vector shapes, resampling, animation, puppet |
-| `crates/paint-formats` | `.sai2`, PSD, OpenRaster and image reading and writing; the shared format table |
-| `crates/paint-app` | The editor window (egui), translations in `lang/` |
-| `crates/paint-3d` | 3D models: reading, poses, rendering, export to GLB and OBJ |
-| `crates/paint-studio` | Brush and plugin workshop |
-| `crates/paint-convert` | Batch converter |
-| `crates/paint-cli` | Command line for comparisons with the reference program |
-| `crates/pen-test` | Pen event logger (Windows Ink, WinTab, XInput 2) |
-| `crates/virtual-tablet` | Virtual tablet via `/dev/uinput` (Linux) |
-| `docs/` | Plan, `.sai2` format, the rules of the program in our own words, comparisons, interface |
-| `tools/` | Release, checks on a hidden display, virtual pen |
+| `crates/paint-core` | Пиксели, тайлы, слои, смешивание, движок кистей, штрихи, векторы, ресемплинг, анимация, кукольная деформация |
+| `crates/paint-formats` | Чтение и запись `.sai2`, PSD, OpenRaster и изображений |
+| `crates/paint-app` | Окно редактора (egui), переводы в `lang/` |
+| `crates/paint-android-full` | `cdylib` с `android_main` для APK |
+| `crates/paint-3d` | 3D-модели: чтение, позы, рендер, экспорт в GLB и OBJ |
+| `crates/paint-studio`, `paint-convert`, `paint-cli` | Мастерская кистей, конвертер, консоль (настольные) |
+| `android/` | Манифест, ресурсы, `build_apk.ps1`, документация по порту |
+| `vendor/` | Пропатченные `winit`, `rfd`, `arboard` для Android |
+| `docs/` | План, формат `.sai2`, правила программы, ручные проверки |
+| `tools/` | Выпуск настольных сборок и проверки |
 
-## About the name and the license
+## Родственные репозитории
 
-GrazySAI was called **SOsai** before version 0.8.42; older versions update to GrazySAI by themselves.
+- [grazyping/GrazySAI](https://github.com/grazyping/GrazySAI) — настольная программа (Windows, Linux, FreeBSD)
+  и руководство пользователя.
+- Этот репозиторий — Android-порт: [avsiel/GrazySAI-on-android](https://github.com/avsiel/GrazySAI-on-android).
 
-MIT — see [LICENSE](LICENSE). GrazySAI is an independent project and is not affiliated with
-SYSTEMAX Software Development, the author of PaintTool SAI; the names SAI and PaintTool SAI
-belong to their owner. The code is written from scratch based on the program's observed
-behaviour and file format; there is no PaintTool SAI code in this repository.
+## Лицензия
+
+Как и GrazySAI — см. [LICENSE](LICENSE). Программа свободная, формат `.sai2` разобран по файлам
+пользователей; адреса из двоичного файла SAI в открытый репозиторий не попадают.
