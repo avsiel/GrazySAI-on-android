@@ -43,9 +43,22 @@ enum Thumb {
     Failed,
 }
 
-/// Сторона миниатюры, точек.
+/// Сторона миниатюры, точек. На телефоне сетка мельче: иначе в строку
+/// помещается одна ячейка, а список приходится прокручивать бесконечно.
+#[cfg(target_os = "android")]
+const THUMB: u32 = 84;
+#[cfg(not(target_os = "android"))]
 const THUMB: u32 = 112;
+#[cfg(target_os = "android")]
+const CELL: Vec2 = Vec2::new(104.0, 116.0);
+#[cfg(not(target_os = "android"))]
 const CELL: Vec2 = Vec2::new(132.0, 150.0);
+
+/// Ширина дерева/закладок слева.
+#[cfg(target_os = "android")]
+const LEFT_W: f32 = 150.0;
+#[cfg(not(target_os = "android"))]
+const LEFT_W: f32 = 250.0;
 
 /// Форматы сохранения: расширение и подпись.
 const SAVE_FORMATS: [(&str, &str); 4] = [("sai2", "SAI 2 (.sai2)"), ("ora", "OpenRaster (.ora)"), ("psd", "Photoshop (.psd)"), ("psb", "Photoshop (.psb)")];
@@ -293,13 +306,16 @@ impl FileViewer {
         let mut open = true;
         let title = if self.mode == Mode::Open { tr("Открыть") } else { tr("Сохранить") };
         let screen = ctx.screen_rect();
+        // На телефоне окно почти на весь экран: при 80% нижний ряд с OK/Отмена
+        // уезжал за край и до кнопок нельзя было дотянуться пальцем.
+        let part = if cfg!(target_os = "android") { 0.94 } else { 0.8 };
         egui::Window::new(title)
             .id(egui::Id::new("file_viewer"))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_size(screen.size() * 0.8)
-            .default_pos(screen.center() - screen.size() * 0.4)
+            .default_size(screen.size() * part)
+            .default_pos(screen.center() - screen.size() * part / 2.0)
             .show(ctx, |ui| out = self.contents(ui));
         if !open {
             out = Some(Outcome::Cancel);
@@ -350,12 +366,14 @@ impl FileViewer {
             }
         });
         ui.separator();
-        let bottom_h = 64.0;
+        // на телефоне нижние две строки выше из-за масштаба UI: 64 точек не хватало,
+        // и OK/Отмена уходили под край окна
+        let bottom_h = if cfg!(target_os = "android") { 96.0 } else { 64.0 };
         let h = (ui.available_height() - bottom_h).max(120.0);
         ui.horizontal(|ui| {
             // слева: проводник и закладки
-            ui.allocate_ui(Vec2::new(250.0, h), |ui| {
-                ui.set_min_size(Vec2::new(250.0, h));
+            ui.allocate_ui(Vec2::new(LEFT_W, h), |ui| {
+                ui.set_min_size(Vec2::new(LEFT_W, h));
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.left_tab, 0, tr("Проводник"));
@@ -363,7 +381,7 @@ impl FileViewer {
                     });
                     egui::Frame::none().fill(sai_ui::gray(255)).stroke(egui::Stroke::new(1.0_f32, sai_ui::border())).show(ui, |ui| {
                         egui::ScrollArea::both().id_salt("fv_tree").auto_shrink([false, false]).max_height(h - 30.0).show(ui, |ui| {
-                            ui.set_min_width(240.0);
+                            ui.set_min_width(LEFT_W - 10.0);
                             if self.left_tab == 0 {
                                 for r in roots() {
                                     self.tree_node(ui, &r, 0);

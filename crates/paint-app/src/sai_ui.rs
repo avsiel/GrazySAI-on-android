@@ -997,6 +997,35 @@ pub fn glyph(p: &Painter, r: Rect, c: Color32, name: &str) {
             p.rect_stroke(q, 0.0, s);
             p.rect_filled(Rect::from_min_size(q.min, Vec2::new(q.width(), k * 0.45)), 0.0, c);
         }
+        "layers" => {
+            // три стопкой лежащих листа
+            for i in 0..3 {
+                let y = ctr.y - k * 0.6 + i as f32 * k * 0.55;
+                p.add(Shape::line(
+                    vec![
+                        Pos2::new(ctr.x - k * 0.75, y),
+                        Pos2::new(ctr.x + k * 0.55, y - k * 0.3),
+                        Pos2::new(ctr.x + k * 0.55, y + k * 0.15),
+                        Pos2::new(ctr.x - k * 0.75, y + k * 0.45),
+                        Pos2::new(ctr.x - k * 0.75, y),
+                    ],
+                    s,
+                ));
+            }
+        }
+        "tools" => {
+            // гаечный ключ и отвёртка: круг и ручка
+            p.circle_stroke(ctr + Vec2::new(-k * 0.35, -k * 0.35), k * 0.35, s);
+            p.line_segment([ctr + Vec2::new(-k * 0.1, -k * 0.1), ctr + Vec2::new(k * 0.75, k * 0.75)], Stroke::new(2.2_f32, c));
+            p.line_segment([ctr + Vec2::new(-k * 0.75, k * 0.4), ctr + Vec2::new(k * 0.1, -k * 0.45)], s);
+            p.line_segment([ctr + Vec2::new(k * 0.1, -k * 0.45), ctr + Vec2::new(k * 0.45, -k * 0.1)], s);
+        }
+        "menu" => {
+            for i in 0..3 {
+                let y = ctr.y - k * 0.55 + i as f32 * k * 0.55;
+                p.line_segment([Pos2::new(ctr.x - k * 0.75, y), Pos2::new(ctr.x + k * 0.75, y)], Stroke::new(1.8_f32, c));
+            }
+        }
         _ => {}
     }
 }

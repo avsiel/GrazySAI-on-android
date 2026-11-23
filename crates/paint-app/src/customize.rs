@@ -209,7 +209,7 @@ impl PaintApp {
         }
         let one = |s: &str| s == "1";
         let w = &mut self.win;
-        w.ui_scale = p[0].parse::<f32>().unwrap_or(1.0).clamp(1.0, 2.0);
+        w.ui_scale = p[0].parse::<f32>().unwrap_or(1.0).clamp(crate::UI_SCALES[0], crate::UI_SCALES[crate::UI_SCALES.len() - 1]);
         w.tools_right = one(p[1]);
         w.layers_right = one(p[2]);
         w.dot_cursor = one(p[3]);
