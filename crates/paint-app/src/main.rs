@@ -13281,6 +13281,12 @@ fn recovery_files() -> Option<(PathBuf, PathBuf)> {
 }
 
 impl eframe::App for PaintApp {
+    /// Фон окна — цвет панели, а не почти чёрный цвет очистки eframe (12,12,12):
+    /// в зазорах между панелями/доками он просвечивал чёрной полосой.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        sai_ui::panel().to_normalized_gamma_f32()
+    }
+
     /// Положение окон и плавающих панелей — в `window.ron` рядом с настройками; без настроек
     /// (прогоны проверок) ничего не запоминается.
     fn persist_egui_memory(&self) -> bool {
