@@ -31,6 +31,8 @@ mod dock;
 mod customize;
 mod lassofill;
 mod layer_style;
+#[cfg(target_os = "android")]
+mod android_shell;
 
 use i18n::{tr, trf};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
@@ -1377,6 +1379,12 @@ struct PaintApp {
     always_viewer: bool,
     viewer_marks: Vec<PathBuf>,
     viewer_dir: Option<PathBuf>,
+    /// Android: внешний каталог приложения — туда можно писать без SAF.
+    android_external_dir: Option<PathBuf>,
+    /// Android: доступ ко всей общей памяти выдан (`MANAGE_EXTERNAL_STORAGE`).
+    android_all_files: bool,
+    /// Android: папки для закладок — корень памяти, `Download`, `Pictures` и т. п.
+    android_roots: Vec<PathBuf>,
     viewer_view: (u8, u8),
     /// «Настройки»: действующие и окно правки (копия до OK).
     opts: Options,
@@ -1461,6 +1469,8 @@ struct PaintApp {
     /// ???????? ??????? (id, pos) ??? ??????.
     gesture_touches: Vec<(u64, egui::Pos2)>,
     gesture_prev: Option<(egui::Pos2, f32, f32)>,
+    /// ????? ??????? ??????? ????? ?????? ?????????.
+    touch_pan_finger: bool,
     /// Последний использованный нажим — для строки состояния.
     last_pressure: f32,
     last_source: &'static str,
@@ -1750,6 +1760,9 @@ impl PaintApp {
             always_viewer: false,
             viewer_marks: Vec::new(),
             viewer_dir: None,
+            android_external_dir: None,
+            android_all_files: false,
+            android_roots: Vec::new(),
             viewer_view: (0, 0),
             opts: Options::default(),
             opts_edit: None,
@@ -1808,6 +1821,7 @@ impl PaintApp {
             stroke_by_touch: false,
             gesture_touches: Vec::new(),
             gesture_prev: None,
+            touch_pan_finger: false,
             last_pressure: 1.0,
             last_source: tr("мышь"),
             view: Rect::NOTHING,
@@ -8107,6 +8121,9 @@ app.open_canvas_dialog(d == "resolution")
                 if ui.checkbox(&mut self.wrap_around, tr("Бесшовный режим (холст повторяется)")).clicked() {
                     ui.close_menu();
                 }
+                if ui.checkbox(&mut self.touch_pan_finger, tr("Одним пальцем — сдвиг")).clicked() {
+                    ui.close_menu();
+                }
                 ui.separator();
                 if ui.add(menu_item("Повернуть вид против часовой", "Shift+PageUp")).clicked() {
                     self.rotate_view(-15.0);
@@ -10798,7 +10815,12 @@ app.open_canvas_dialog(d == "resolution")
                 self.offset += anchor - to_canvas(pos, self.zoom, self.offset);
             }
         }
-        let panning = middle || space || self.tool == Tool::Hand;
+        // ???? ????? ??????? ????? ?????? ?????????, ???? ???????? ?????? ??????? ? ??????.
+        let finger_pan = self.touch_pan_finger && self.gesture_touches.len() == 1;
+        if finger_pan {
+            pressed = false; released = false; moves.clear();
+        }
+        let panning = middle || space || self.tool == Tool::Hand || finger_pan;
         let ctrl = ui.input(|i| i.modifiers.command);
         if self.puppet_takes_mouse(pressed && response.hovered() && !panning) {
             // марионетка: булавки
@@ -14457,3 +14479,77 @@ mod input_tests {
     }
 }
 
+
+/// Android: ?????????? ??????? (??? ?? `PaintApp`, ??? ? ?? ??????? ?????).
+///
+/// ?????????? ?? ????? ????? `.so` (`android_main`). Winit ?? Android ???????
+/// ??????? ???????? `AndroidApp` ? ??????????? event loop ? ??? ??????
+/// `event_loop_builder` ????. ????????? ??? ????????? ? ????????? ?? ?????.
+#[cfg(target_os = "android")]
+pub fn run_android(app: winit::platform::android::activity::AndroidApp) -> eframe::Result<()> {
+    use winit::platform::android::EventLoopBuilderExtAndroid;
+
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Info)
+            .with_tag("GrazySAI"),
+    );
+    // ?????? ? UI ?????? ???? ????? ? `logcat`, ? ?? ?????? ? stderr.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("GrazySAI panic: {info}");
+        default_hook(info);
+    }));
+
+    android_shell::immersive_fullscreen();
+    let data_dir = app.internal_data_path();
+    let external_dir = app.external_data_path();
+    if let Some(dir) = &external_dir {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Some(dir) = &data_dir {
+        let _ = std::env::set_current_dir(dir);
+        // ????????? ? eframe ???? ???????? ??????? ????? HOME/XDG ? ?? Android ??? ???.
+        std::env::set_var("HOME", dir);
+        let config = dir.join("config");
+        let _ = std::fs::create_dir_all(&config);
+        std::env::set_var("XDG_CONFIG_HOME", &config);
+    }
+
+    let mut options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_title("GrazySAI"),
+        persist_window: false,
+        persistence_path: data_dir.map(|d| d.join("window.ron")),
+        // WGPU ?? Android ??????????? ?? ?? ???? ???????????; OpenGL ???????? ????? ?????.
+        renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    };
+    options.event_loop_builder = Some(Box::new(move |builder| {
+        builder.with_android_app(app.clone());
+    }));
+
+    eframe::run_native(
+        "GrazySAI",
+        options,
+        Box::new(move |cc| {
+            i18n::install_fonts(&cc.egui_ctx);
+            let feed = pen::new_feed();
+            let mut app = PaintApp::new(None, feed.clone());
+            pen::spawn(feed, cc.egui_ctx.clone());
+            sai_ui::apply_style(&cc.egui_ctx);
+            // Self-update impossible on Android.
+            app.check_updates = false;
+            // ????????? ???????? ??? ? ?????????? ?????????? FileViewer ?? SAI.
+            app.always_viewer = true;
+            app.android_all_files = android_shell::all_files_access();
+            app.android_roots = android_shell::roots();
+            if app.android_all_files {
+                app.viewer_dir = app.android_roots.first().cloned();
+            } else {
+                app.status = tr("???? ? ??????? ?? ???? ???????? ? ??????? Download ? ????????? ??????").to_string();
+            }
+            app.android_external_dir = external_dir;
+            Ok(Box::new(app))
+        }),
+    )
+}
