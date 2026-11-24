@@ -8130,7 +8130,7 @@ app.open_canvas_dialog(d == "resolution")
                 if ui.checkbox(&mut self.wrap_around, tr("Бесшовный режим (холст повторяется)")).clicked() {
                     ui.close_menu();
                 }
-                if ui.checkbox(&mut self.touch_pan_finger, tr("Одним пальцем — сдвиг")).clicked() {
+                if ui.checkbox(&mut self.touch_pan_finger, "One-finger pan").clicked() {
                     ui.close_menu();
                 }
                 ui.separator();
@@ -8335,6 +8335,13 @@ app.open_canvas_dialog(d == "resolution")
                     ui.close_menu();
                 }
                 ui.separator();
+                ui.separator();
+                if ui.checkbox(&mut self.touch_pan_finger, "One-finger pan")
+                    .on_hover_text("Move the canvas with one finger instead of drawing")
+                    .changed()
+                {
+                    ui.close_menu();
+                }
                 if ui.add(menu_icons::button("GrazySAI на GitHub")).clicked() {
                     update::open_url(update::REPO);
                     ui.close_menu();
