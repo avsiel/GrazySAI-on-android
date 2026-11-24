@@ -1458,6 +1458,9 @@ struct PaintApp {
     /// Текущий мазок начат пером (касанием): до его конца нажим берётся от пера, даже когда
     /// касание уже кончилось — иначе последняя точка при отрыве шла бы с нажимом мыши 1,0.
     stroke_by_touch: bool,
+    /// ???????? ??????? (id, pos) ??? ??????.
+    gesture_touches: Vec<(u64, egui::Pos2)>,
+    gesture_prev: Option<(egui::Pos2, f32, f32)>,
     /// Последний использованный нажим — для строки состояния.
     last_pressure: f32,
     last_source: &'static str,
@@ -1803,6 +1806,8 @@ impl PaintApp {
             touch_force: None,
             touch_down: false,
             stroke_by_touch: false,
+            gesture_touches: Vec::new(),
+            gesture_prev: None,
             last_pressure: 1.0,
             last_source: tr("мышь"),
             view: Rect::NOTHING,
@@ -10677,12 +10682,12 @@ app.open_canvas_dialog(d == "resolution")
                         }
                     })
                     .collect();
-                let touches: Vec<(egui::TouchPhase, Option<f32>)> = i
+                let touches: Vec<(u64, egui::TouchPhase, egui::Pos2, Option<f32>)> = i
                     .events
                     .iter()
                     .filter_map(|e| {
-                        if let egui::Event::Touch { phase, force, .. } = e {
-                            Some((*phase, *force))
+                        if let egui::Event::Touch { id, phase, pos, force, .. } = e {
+                            Some((id.0, *phase, *pos, *force))
                         } else {
                             None
                         }
@@ -10723,19 +10728,60 @@ app.open_canvas_dialog(d == "resolution")
             zoom_delta = 1.0;
             pressed = false;
         }
-        for (phase, force) in touches {
+        for (id, phase, pos, force) in &touches {
             match phase {
-                egui::TouchPhase::Start | egui::TouchPhase::Move => {
+                egui::TouchPhase::Start => {
+                    self.gesture_touches.retain(|(i, _)| i != id);
+                    self.gesture_touches.push((*id, *pos));
+                    self.touch_down = true;
+                    if let Some(f) = force { self.touch_force = Some(f.clamp(0.0, 1.0)); }
+                }
+                egui::TouchPhase::Move => {
+                    if let Some(t) = self.gesture_touches.iter_mut().find(|(i, _)| i == id) { t.1 = *pos; }
+                    else { self.gesture_touches.push((*id, *pos)); }
                     self.touch_down = true;
                     match force {
                         Some(f) => self.touch_force = Some(f.clamp(0.0, 1.0)),
-                        // Перо уже известно, а силы нет — это касание легче первого уровня нажима.
                         None if self.touch_force.is_some() => self.touch_force = Some(0.0),
                         None => {}
                     }
                 }
-                egui::TouchPhase::End | egui::TouchPhase::Cancel => self.touch_down = false,
+                egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                    self.gesture_touches.retain(|(i, _)| i != id);
+                    self.touch_down = !self.gesture_touches.is_empty();
+                }
             }
+        }
+        // ????? ????? ????????: ?????, ???????, ???????.
+        if self.gesture_touches.len() >= 2 {
+            let a = self.gesture_touches[0].1;
+            let b = self.gesture_touches[1].1;
+            let center = a + (b - a) / 2.0;
+            let dist = ((b - a).length() / 2.0).max(1.0);
+            let angle = (b - a).angle();
+            if let Some((pc, pd, pa)) = self.gesture_prev {
+                let pan = center - pc;
+                if pan != egui::Vec2::ZERO { self.offset += pan / self.zoom; }
+                let zf = (dist / pd).clamp(0.5, 2.0);
+                if (zf - 1.0).abs() > 0.001 {
+                    let anchor = to_canvas(center, self.zoom, self.offset);
+                    self.zoom = (self.zoom * zf).clamp(0.02, 32.0);
+                    self.offset += anchor - to_canvas(center, self.zoom, self.offset);
+                }
+                let mut da = angle - pa;
+                while da > std::f32::consts::PI { da -= std::f32::consts::TAU; }
+                while da < -std::f32::consts::PI { da += std::f32::consts::TAU; }
+                if da.abs() > 0.05 { self.view_angle += da; }
+            }
+            self.gesture_prev = Some((center, dist, angle));
+            // ?????? ????? ???????? ?????? ??? ????????????? ?????
+            if self.live.is_some() { self.live = None; }
+            if self.line_stroke.is_some() { self.line_stroke = None; }
+            if self.sel_stroke.is_some() { self.sel_stroke = None; }
+            if self.mask_stroke.is_some() { self.mask_stroke = None; }
+            pressed = false; released = false; moves.clear();
+        } else {
+            self.gesture_prev = None;
         }
         if let Some(pos) = pointer.filter(|p| rect.contains(*p)) {
             let factor = if zoom_delta != 1.0 {
