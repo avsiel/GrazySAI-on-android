@@ -231,6 +231,13 @@ impl PaintApp {
         let mut style = egui_dock::Style::from_egui(&ctx.style());
         style.dock_area_padding = None;
         style.main_surface_border_stroke = egui::Stroke::NONE;
+        // Разделители между панелями: в SAI-теме stroke почти чёрный, из-за чего между
+        // панелями появлялась чёрная полоса. Рисуем их цветом панели, чуть темнее.
+        let panel = ctx.style().visuals.panel_fill;
+        style.separator.width = 1.0;
+        style.separator.color_idle = panel.gamma_multiply(0.80);
+        style.separator.color_hovered = panel.gamma_multiply(0.60);
+        style.separator.color_dragged = panel.gamma_multiply(0.50);
         let mut dock = std::mem::replace(&mut self.dock, DockState::new(Vec::new()));
         // оторванная вкладка уносит ширину своей колонки — окно не уже панели SAI
         for i in 1..dock.surfaces_count() {
@@ -249,7 +256,9 @@ impl PaintApp {
         t.tab_context_menu.eject_button = tr("В отдельное окно").to_string();
         t.window.close_button_tooltip = tr("Закрыть").to_string();
         self.panels_busy.set(true);
-        egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(panel))
+            .show(ctx, |ui| {
             DockArea::new(&mut dock)
                 .id(egui::Id::new("dock"))
                 .style(style)

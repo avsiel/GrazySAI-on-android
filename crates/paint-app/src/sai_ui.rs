@@ -81,8 +81,11 @@ pub fn apply_style(ctx: &egui::Context) {
     style.spacing.button_padding = Vec2::new(4.0, 1.0);
     style.spacing.interact_size = Vec2::new(18.0, 18.0);
     style.spacing.combo_height = 300.0;
-    // полоса прокрутки видна всегда, когда есть что прокручивать, а не только под мышью
-    style.spacing.scroll = egui::style::ScrollStyle::solid();
+    // полоса прокрутки видна всегда, когда есть что прокручивать, а не только под мышью;
+    // ручка — цветом кнопок, а не цветом текста (иначе она чёрная и выглядит как чёрная полоса)
+    let mut scroll = egui::style::ScrollStyle::solid();
+    scroll.foreground_color = false;
+    style.spacing.scroll = scroll;
     use egui::{FontId, TextStyle};
     style.text_styles = [
         (TextStyle::Heading, FontId::proportional(14.0)),

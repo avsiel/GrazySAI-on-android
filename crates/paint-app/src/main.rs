@@ -1469,6 +1469,11 @@ struct PaintApp {
     /// ???????? ??????? (id, pos) ??? ??????.
     gesture_touches: Vec<(u64, egui::Pos2)>,
     gesture_prev: Option<(egui::Pos2, f32, f32)>,
+    /// ?????: ????? ??????, ????? ? ?????? ? ???????? ??????? ? ??? ???? ??????/????????.
+    gesture_time: f64,
+    gesture_centroid0: egui::Pos2,
+    gesture_moved: bool,
+    gesture_max: usize,
     /// ????? ??????? ??????? ????? ?????? ?????????.
     touch_pan_finger: bool,
     /// Последний использованный нажим — для строки состояния.
@@ -1821,6 +1826,10 @@ impl PaintApp {
             stroke_by_touch: false,
             gesture_touches: Vec::new(),
             gesture_prev: None,
+            gesture_time: 0.0,
+            gesture_centroid0: egui::Pos2::ZERO,
+            gesture_moved: false,
+            gesture_max: 0,
             touch_pan_finger: false,
             last_pressure: 1.0,
             last_source: tr("мышь"),
@@ -10639,6 +10648,14 @@ app.open_canvas_dialog(d == "resolution")
         }
     }
 
+    /// ??????? ????? ???????? ???????.
+    fn gesture_centroid(touches: &[(u64, egui::Pos2)]) -> egui::Pos2 {
+        if touches.is_empty() { return egui::Pos2::ZERO; }
+        let mut sum = egui::Vec2::ZERO;
+        for (_, p) in touches { sum += p.to_vec2(); }
+        (sum / touches.len() as f32).to_pos2()
+    }
+
     fn canvas(&mut self, ui: &mut egui::Ui) {
         let (rect, response) =
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
@@ -10745,17 +10762,29 @@ app.open_canvas_dialog(d == "resolution")
             zoom_delta = 1.0;
             pressed = false;
         }
+        let now = ui.input(|i| i.time);
         for (id, phase, pos, force) in &touches {
             match phase {
                 egui::TouchPhase::Start => {
+                    if self.gesture_touches.is_empty() {
+                        self.gesture_time = now;
+                        self.gesture_moved = false;
+                        self.gesture_max = 0;
+                        self.gesture_prev = None;
+                    }
                     self.gesture_touches.retain(|(i, _)| i != id);
                     self.gesture_touches.push((*id, *pos));
+                    self.gesture_max = self.gesture_max.max(self.gesture_touches.len());
+                    self.gesture_centroid0 = Self::gesture_centroid(&self.gesture_touches);
                     self.touch_down = true;
                     if let Some(f) = force { self.touch_force = Some(f.clamp(0.0, 1.0)); }
                 }
                 egui::TouchPhase::Move => {
                     if let Some(t) = self.gesture_touches.iter_mut().find(|(i, _)| i == id) { t.1 = *pos; }
                     else { self.gesture_touches.push((*id, *pos)); }
+                    if (Self::gesture_centroid(&self.gesture_touches) - self.gesture_centroid0).length() > 12.0 {
+                        self.gesture_moved = true;
+                    }
                     self.touch_down = true;
                     match force {
                         Some(f) => self.touch_force = Some(f.clamp(0.0, 1.0)),
@@ -10766,10 +10795,22 @@ app.open_canvas_dialog(d == "resolution")
                 egui::TouchPhase::End | egui::TouchPhase::Cancel => {
                     self.gesture_touches.retain(|(i, _)| i != id);
                     self.touch_down = !self.gesture_touches.is_empty();
+                    if self.gesture_touches.is_empty() {
+                        // ??? ? Ibis: ???????? ??? ????? ???????? ? ??????, ????? ? ???????.
+                        if now - self.gesture_time < 0.35 && !self.gesture_moved {
+                            match self.gesture_max {
+                                2 => self.undo(),
+                                3 => self.redo(),
+                                _ => {}
+                            }
+                        }
+                        self.gesture_max = 0;
+                        self.gesture_prev = None;
+                    }
                 }
             }
         }
-        // ????? ????? ????????: ?????, ???????, ???????.
+        // ????? ??? ? Ibis Paint: ??? ?????? ? ????????, ??????? ? ??????? ?????? ?????? ?????.
         if self.gesture_touches.len() >= 2 {
             let a = self.gesture_touches[0].1;
             let b = self.gesture_touches[1].1;
@@ -10777,26 +10818,31 @@ app.open_canvas_dialog(d == "resolution")
             let dist = ((b - a).length() / 2.0).max(1.0);
             let angle = (b - a).angle();
             if let Some((pc, pd, pa)) = self.gesture_prev {
-                let pan = center - pc;
-                if pan != egui::Vec2::ZERO { self.offset += pan / self.zoom; }
-                let zf = (dist / pd).clamp(0.5, 2.0);
-                if (zf - 1.0).abs() > 0.001 {
-                    let anchor = to_canvas(center, self.zoom, self.offset);
-                    self.zoom = (self.zoom * zf).clamp(0.02, 32.0);
-                    self.offset += anchor - to_canvas(center, self.zoom, self.offset);
-                }
                 let mut da = angle - pa;
                 while da > std::f32::consts::PI { da -= std::f32::consts::TAU; }
                 while da < -std::f32::consts::PI { da += std::f32::consts::TAU; }
-                if da.abs() > 0.05 { self.view_angle += da; }
+                let scale = (dist / pd).clamp(0.25, 4.0);
+                // ????? ?????? ??? ??????? ??????? ????? ?????? ????????? ??? ????? ???????.
+                let anchor = ViewXf::new(rect, self.zoom, self.offset, self.view_angle, self.view_flip).to_canvas(pc);
+                let zoom = (self.zoom * scale).clamp(0.02, 32.0);
+                let mut angle = self.view_angle + da;
+                while angle > std::f32::consts::PI { angle -= std::f32::consts::TAU; }
+                while angle <= -std::f32::consts::PI { angle += std::f32::consts::TAU; }
+                let vx = ViewXf::new(rect, zoom, Vec2::ZERO, angle, self.view_flip);
+                let center_new = anchor - vx.vec_to_canvas(center - rect.center());
+                self.zoom = zoom;
+                self.view_angle = angle;
+                self.offset = center_new - rect.size() / 2.0 / zoom;
             }
             self.gesture_prev = Some((center, dist, angle));
-            // ?????? ????? ???????? ?????? ??? ????????????? ?????
+            // ????? ?????, ??????? ?????? ???????, ?????????? ? ??? ?????????, ? ?? ?????????.
             if self.live.is_some() { self.live = None; }
             if self.line_stroke.is_some() { self.line_stroke = None; }
             if self.sel_stroke.is_some() { self.sel_stroke = None; }
             if self.mask_stroke.is_some() { self.mask_stroke = None; }
-            pressed = false; released = false; moves.clear();
+            pressed = false;
+            released = false;
+            moves.clear();
         } else {
             self.gesture_prev = None;
         }
