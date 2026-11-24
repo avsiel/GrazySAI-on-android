@@ -28,12 +28,9 @@ mod gpu_filter;
 mod puppet_ui;
 mod timeline;
 mod dock;
-mod mobile;
 mod customize;
 mod lassofill;
 mod layer_style;
-#[cfg(target_os = "android")]
-mod android_shell;
 
 use i18n::{tr, trf};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
@@ -744,9 +741,6 @@ struct TabView {
     view: FloatView,
 }
 
-/// Варианты масштаба интерфейса: 75% удобно на телефоне, 250% — на планшете с касанием.
-const UI_SCALES: [f32; 7] = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5];
-
 /// Меню «Окно», как в SAI 2017.
 #[derive(Clone, Copy, PartialEq)]
 struct WindowOpts {
@@ -1356,20 +1350,6 @@ struct PaintApp {
     /// Дерево вкладок стыкуемых панелей и его последний сохранённый текст.
     dock: egui_dock::DockState<dock::Tab>,
     dock_saved: String,
-    /// Телефонный интерфейс: какой лист снизу открыт и развёрнут ли ряд кисти.
-    mobile: mobile::Mobile,
-    /// Разбор касаний пальцами: сдвиг, масштаб и поворот вида двумя пальцами.
-    gestures: mobile::Gestures,
-    /// Телефон: «Рука» включена — один палец двигает холст, а не рисует.
-    android_pan_toggle: bool,
-    /// Телефонный листовой интерфейс (`true`) или десктопные панели из `dock`.
-    android_phone: bool,
-    /// Телефон: касание пришло от пера (последнее событие пера было стилусом).
-    android_stylus_touch: bool,
-    /// Телефон: отступы выреза и системных полос (сверху, снизу, слева, справа), точки.
-    android_insets: [f32; 4],
-    /// Телефон: когда в прошлый раз спрашивали отступы.
-    android_insets_at: Option<Instant>,
     /// Места плавающих окон стыковки: (номер поверхности, x, y, ширина, высота).
     dock_windows: Vec<(usize, [f32; 4])>,
     /// Стыкуемые панели рисуются, а дерево вкладок вынуто: сохранение настроек — отложить.
@@ -1397,15 +1377,6 @@ struct PaintApp {
     always_viewer: bool,
     viewer_marks: Vec<PathBuf>,
     viewer_dir: Option<PathBuf>,
-    /// Каталог внешнего хранилища приложения (`Android/data/<пакет>/files`) — основная
-    /// рабочая папка на Android: туда можно писать без разрешения SAF.
-    android_external_dir: Option<PathBuf>,
-    /// Android: доступ ко всей общей памяти выдан (`MANAGE_EXTERNAL_STORAGE`).
-    android_all_files: bool,
-    /// Android: папки для закладок — корень памяти, `Download`, `Pictures` и т. п.
-    android_roots: Vec<PathBuf>,
-    /// Когда последний раз спрашивали систему о доступе (проверка раз в пару секунд).
-    android_checked: Option<Instant>,
     viewer_view: (u8, u8),
     /// «Настройки»: действующие и окно правки (копия до OK).
     opts: Options,
@@ -1483,25 +1454,6 @@ struct PaintApp {
     pen: pen::PenFeed,
     /// Сила последнего касания пера (Windows Ink); `None` — в этом сеансе пера ещё не было.
     touch_force: Option<f32>,
-    /// Последняя записанная в logcat сила касания (Android-диагностика пера).
-    #[cfg(target_os = "android")]
-    last_force_log: f32,
-    #[cfg(target_os = "android")]
-    last_force_log_at: Instant,
-    /// Android: ластик из `MotionEvent` (ToolType::Eraser или вторая кнопка пера).
-    #[cfg(target_os = "android")]
-    touch_eraser: bool,
-    /// Android: наклон пера `[величина 0..1, направление (радианы), поворот]`.
-    #[cfg(target_os = "android")]
-    touch_tilt: [f32; 3],
-    /// Android: номер последнего разобранного MotionEvent — для диагностики кнопок пера.
-    #[cfg(target_os = "android")]
-    last_pen_seq: u64,
-    /// Android: чтобы не засорять logcat каждым событием пера (120 Гц).
-    #[cfg(target_os = "android")]
-    last_pen_log_at: Instant,
-    #[cfg(target_os = "android")]
-    last_pen_buttons: u32,
     touch_down: bool,
     /// Текущий мазок начат пером (касанием): до его конца нажим берётся от пера, даже когда
     /// касание уже кончилось — иначе последняя точка при отрыве шла бы с нажимом мыши 1,0.
@@ -1779,15 +1731,8 @@ impl PaintApp {
             actions: Default::default(),
             custom: Default::default(),
             timeline: Default::default(),
-            dock: if cfg!(target_os = "android") { dock::phone_layout() } else { dock::default_layout(false, false) },
+            dock: dock::default_layout(false, false),
             dock_saved: String::new(),
-            mobile: Default::default(),
-            gestures: Default::default(),
-            android_pan_toggle: false,
-            android_phone: true,
-            android_stylus_touch: false,
-            android_insets: [0.0; 4],
-            android_insets_at: None,
             dock_windows: Vec::new(),
             panels_busy: Default::default(),
             save_later: Default::default(),
@@ -1802,10 +1747,6 @@ impl PaintApp {
             always_viewer: false,
             viewer_marks: Vec::new(),
             viewer_dir: None,
-            android_external_dir: None,
-            android_all_files: false,
-            android_roots: Vec::new(),
-            android_checked: None,
             viewer_view: (0, 0),
             opts: Options::default(),
             opts_edit: None,
@@ -1860,20 +1801,6 @@ impl PaintApp {
             gpu_race: Default::default(),
             pen,
             touch_force: None,
-            #[cfg(target_os = "android")]
-            last_force_log: -1.0,
-            #[cfg(target_os = "android")]
-            last_force_log_at: Instant::now(),
-            #[cfg(target_os = "android")]
-            touch_eraser: false,
-            #[cfg(target_os = "android")]
-            touch_tilt: [0.0; 3],
-            #[cfg(target_os = "android")]
-            last_pen_seq: 0,
-            #[cfg(target_os = "android")]
-            last_pen_log_at: Instant::now(),
-            #[cfg(target_os = "android")]
-            last_pen_buttons: 0,
             touch_down: false,
             stroke_by_touch: false,
             last_pressure: 1.0,
@@ -2269,7 +2196,7 @@ app.open_canvas_dialog(d == "resolution")
             keys::set_hints(v);
         }
         if let Some(v) = s.f32("ui_scale") {
-            self.win.ui_scale = v.clamp(UI_SCALES[0], UI_SCALES[UI_SCALES.len() - 1]);
+            self.win.ui_scale = v.clamp(1.0, 2.0);
         }
         s.read_bool("tools_right", &mut self.win.tools_right);
         for (i, k) in SHOW_KEYS.iter().enumerate() {
@@ -2318,21 +2245,8 @@ app.open_canvas_dialog(d == "resolution")
         s.read_bool("layers_right", &mut self.win.layers_right);
         s.read_bool("dock_ui", &mut self.win.dock);
         self.dock = s.str("dock_layout").and_then(dock::parse).unwrap_or_else(|| dock::default_layout(self.win.tools_right, self.win.layers_right));
-        #[cfg(target_os = "android")]
-        {
-            // На телефоне всегда одна колонка вкладок: иначе сохранённая десктопная
-            // раскладка снова займёт всю ширину и закроет холст.
-            self.win.dock = true;
-            self.dock = dock::phone_layout();
-        }
         self.dock_saved = self.dock_text();
         s.read_bool("dot_cursor", &mut self.win.dot_cursor);
-        // Телефонный интерфейс. Не было записи (первый запуск) — да; ведь это телефон.
-        let mut phone = true;
-        if s.bool("android_phone_ui").is_some() {
-            s.read_bool("android_phone_ui", &mut phone);
-        }
-        self.android_phone = phone;
         s.read_bool("brush_circle", &mut self.win.brush_circle);
         s.read_bool("size_numbers", &mut self.win.size_numbers);
         if let Some(v) = s.f32("lib.card") {
@@ -2549,7 +2463,6 @@ app.open_canvas_dialog(d == "resolution")
         s.set("dock_ui", w.dock as u8);
         s.set("dock_layout", self.dock_text());
         s.set("dot_cursor", w.dot_cursor as u8);
-        s.set("android_phone_ui", self.android_phone as u8);
         s.set("brush_circle", w.brush_circle as u8);
         s.set("size_numbers", w.size_numbers as u8);
         s.set("lib.card", self.lib_win.card);
@@ -5233,28 +5146,13 @@ app.open_canvas_dialog(d == "resolution")
             .as_ref()
             .and_then(|f| f.parent().map(|p| p.to_path_buf()))
             .or_else(|| self.viewer_dir.clone())
-            .or_else(|| self.android_external_dir.clone())
             .unwrap_or_else(file_viewer::home);
         let name = if mode == file_viewer::Mode::Save {
             self.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| tr("НовыйХолст1.sai2").to_string())
         } else {
             String::new()
         };
-        let mut marks = self.viewer_marks.clone();
-        #[cfg(target_os = "android")]
-        {
-            // Впереди — корень памяти и обычные папки, затем каталог приложения.
-            let mut add = self.android_roots.clone();
-            if let Some(external) = &self.android_external_dir {
-                add.push(external.clone());
-            }
-            for p in add.into_iter().rev() {
-                if !marks.contains(&p) {
-                    marks.insert(0, p);
-                }
-            }
-        }
-        let mut v = file_viewer::FileViewer::new(mode, dir, name, marks);
+        let mut v = file_viewer::FileViewer::new(mode, dir, name, self.viewer_marks.clone());
         (v.view, v.sort) = self.viewer_view;
         self.viewer = Some(v);
     }
@@ -5279,31 +5177,8 @@ app.open_canvas_dialog(d == "resolution")
         }
     }
 
-    /// Android: пока доступа ко всем файлам нет, раз в пару секунд спрашиваем систему —
-    /// пользователь мог вернуться из настроек. Как только доступ выдан, открываем корень памяти.
-    fn android_access_tick(&mut self, ctx: &egui::Context) {
-        #[cfg(not(target_os = "android"))]
-        let _ = ctx;
-        #[cfg(target_os = "android")]
-        {
-            if self.android_all_files || self.android_checked.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2)) {
-                return;
-            }
-            self.android_checked = Some(Instant::now());
-            if !android_shell::all_files_access() {
-                return;
-            }
-            self.android_all_files = true;
-            self.android_roots = android_shell::roots();
-            if let Some(root) = self.android_roots.first() {
-                self.viewer_dir = Some(root.clone());
-            }
-            self.status = tr("Доступ ко всем папкам открыт").to_string();
-            ctx.request_repaint();
-        }
-    }
-
-    fn ask_open(&mut self) {        if self.always_viewer {
+    fn ask_open(&mut self) {
+        if self.always_viewer {
             self.open_viewer(file_viewer::Mode::Open);
             return;
         }
@@ -5438,12 +5313,7 @@ app.open_canvas_dialog(d == "resolution")
     fn export_default(&self, ext: &str) -> PathBuf {
         match &self.file {
             Some(f) => f.with_extension(format!("export.{ext}")),
-            None => self
-                .android_external_dir
-                .clone()
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_default()
-                .join(format!("grazysai-export.{ext}")),
+            None => std::env::current_dir().unwrap_or_default().join(format!("grazysai-export.{ext}")),
         }
     }
 
@@ -5721,32 +5591,18 @@ app.open_canvas_dialog(d == "resolution")
         });
         // наклон и поворот пера — для динамики кисти
         if let Some(live) = self.live.as_mut() {
-            #[cfg(target_os = "android")]
-            let pen_pose = if fresh.is_some() { pose } else if self.touch_down { self.touch_tilt } else { [0.0; 3] };
-            #[cfg(not(target_os = "android"))]
-            let pen_pose = if fresh.is_some() { pose } else { [0.0; 3] };
-            live.stroke.pen = pen_pose;
+            live.stroke.pen = if fresh.is_some() { pose } else { [0.0; 3] };
         }
         let m = self.opts.min_pressure;
         let gate = |p: f32| ((p - m) / (1.0 - m)).max(0.0);
         let (raw, pressure, eraser, source) = match (fresh, self.touch_force) {
             (Some((p, e)), _) => (p, gate(self.opts.pressure_curve.apply(p)), e, if api == "WinTab" { tr("перо (WinTab)") } else { tr("перо (XInput 2)") }),
-            (None, Some(f)) if self.touch_down || (self.stroke_by_touch && (self.live.is_some() || self.line_stroke.is_some() || self.sel_stroke.is_some() || self.mask_stroke.is_some())) => {
-                #[cfg(target_os = "android")]
-                let eraser = self.touch_eraser;
-                #[cfg(not(target_os = "android"))]
-                let eraser = false;
-                (f, gate(self.opts.pressure_curve.apply(f)), eraser, tr("перо (Windows Ink)"))
-            },
+            (None, Some(f)) if self.touch_down || (self.stroke_by_touch && (self.live.is_some() || self.line_stroke.is_some() || self.sel_stroke.is_some() || self.mask_stroke.is_some())) => (f, gate(self.opts.pressure_curve.apply(f)), false, tr("перо (Windows Ink)")),
             _ => (1.0, 1.0, false, tr("мышь")),
         };
         // нажим слабее порога — перо будто не касается (мышь не в счёт)
         self.below_min = m > 0.0 && self.opts.pressure_curve.apply(raw) < m;
         self.last_pressure = pressure;
-        #[cfg(target_os = "android")]
-        if self.last_source != source {
-            log::info!("источник нажима: {source} (raw={raw:.2})");
-        }
         self.last_source = source;
         let e = self.pen_stats.entry(source).or_insert((f32::MAX, f32::MIN, 0));
         *e = (e.0.min(pressure), e.1.max(pressure), e.2 + 1);
@@ -6209,26 +6065,6 @@ app.open_canvas_dialog(d == "resolution")
             s.add / n as f32
         );
         *s = FrameStats::default();
-    }
-
-    /// Отменить мазок, начатый пальцем: второй палец на холсте значит «двигаю вид»,
-    /// а не «рисую». Перо (с нажимом) этого не касается.
-    #[cfg(target_os = "android")]
-    fn cancel_touch_stroke(&mut self) {
-        let by_touch = self.touch_down || self.stroke_by_touch;
-        if !by_touch {
-            return;
-        }
-        self.pending_start = None;
-        if let Some(live) = self.live.take() {
-            let keys = self.doc.live_cancel(live);
-            self.invalidate(keys);
-        }
-        self.sel_stroke = None;
-        self.mask_stroke = None;
-        self.line_stroke = None;
-        self.smoother = Stabilizer::with_level(self.stabilizer);
-        self.raw_last = None;
     }
 
     fn end_stroke(&mut self) {
@@ -7644,23 +7480,6 @@ app.open_canvas_dialog(d == "resolution")
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
-        #[cfg(target_os = "android")]
-        {
-            // На телефоне строка меню шире экрана: без прокрутки «Окно», «Вид» и
-            // кнопка масштаба интерфейса оказываются за правым краем (S24 Ultra).
-            // Закрепляем высоту, иначе ScrollArea растягивается на всё окно и
-            // перекрывает рабочую область.
-            let id = ui.make_persistent_id("android_menu_scroll");
-            egui::ScrollArea::horizontal().id_source(id).max_height(28.0).show(ui, |ui| {
-                self.menu_bar_inner(ui);
-            });
-            return;
-        }
-        #[cfg(not(target_os = "android"))]
-        self.menu_bar_inner(ui);
-    }
-
-    fn menu_bar_inner(&mut self, ui: &mut egui::Ui) {
         egui::menu::bar(ui, |ui| {
             ui.menu_button(keys::hint(tr("Файл(F)")), |ui| {
                 if ui.add(menu_icons::button("Создать холст…")).clicked() {
@@ -7704,25 +7523,6 @@ app.open_canvas_dialog(d == "resolution")
                 if ui.add(menu_icons::button("Сохранить через обозреватель…")).clicked() {
                     self.open_viewer(file_viewer::Mode::Save);
                     ui.close_menu();
-                }
-                #[cfg(target_os = "android")]
-                {
-                    if self.android_all_files {
-                        ui.weak(tr("Доступ ко всем папкам включён"));
-                    } else if ui
-                        .add(menu_icons::button("Доступ ко всем папкам…"))
-                        .on_hover_text(tr("Android: разрешить обозревателю видеть Download, Pictures и всю память"))
-                        .clicked()
-                    {
-                        log::info!("GrazySAI: menu: request all-files access");
-                        let ok = android_shell::request_all_files_access();
-                        self.status = if ok {
-                            tr("Разрешите доступ в настройках Android").to_string()
-                        } else {
-                            tr("Не удалось открыть настройки доступа").to_string()
-                        };
-                        ui.close_menu();
-                    }
                 }
                 ui.separator();
                 ui.menu_button(menu_icons::label("Экспорт"), |ui| {
@@ -8444,7 +8244,7 @@ app.open_canvas_dialog(d == "resolution")
                 // как меню Window в SAI 2017
                 let w = &mut self.win;
                 ui.menu_button(menu_icons::label("Масштаб интерфейса"), |ui| {
-                    for z in UI_SCALES {
+                    for z in [1.0_f32, 1.25, 1.5, 2.0] {
                         if ui.radio((w.ui_scale - z).abs() < 0.01, format!("{:.0}%", z * 100.0)).clicked() {
                             w.ui_scale = z;
                             ui.close_menu();
@@ -8525,18 +8325,6 @@ app.open_canvas_dialog(d == "resolution")
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // На планшете «Окно → Масштаб интерфейса» — три касания; здесь один тап
-                // перебирает те же значения. Внизу кнопку нельзя ставить: там системный taskbar.
-                #[cfg(target_os = "android")]
-                if ui.add(egui::Button::new(format!("UI {:.0}%", self.win.ui_scale * 100.0)))
-                    .on_hover_text(tr("Масштаб интерфейса — коснитесь, чтобы переключить"))
-                    .clicked()
-                {
-                    let cur = self.win.ui_scale;
-                    self.win.ui_scale = UI_SCALES.iter().copied()
-                        .find(|s| *s > cur + 0.01)
-                        .unwrap_or(UI_SCALES[0]);
-                }
                 if ui.add(egui::Button::new(egui::RichText::new("GitHub").weak()).frame(false))
                     .on_hover_text(update::REPO)
                     .clicked()
@@ -10935,96 +10723,12 @@ app.open_canvas_dialog(d == "resolution")
             zoom_delta = 1.0;
             pressed = false;
         }
-        // Наклон и кнопки пера приходят из MotionEvent мимо egui::Touch —patched winit
-        // сохраняет их в winit::platform::android::pen_state().
-        #[cfg(target_os = "android")]
-        let pen = winit::platform::android::pen_state();
-        #[cfg(not(target_os = "android"))]
-        let _ = &touches;
-        // Касания пальцами: двумя — сдвиг, масштаб и поворот вида; тремя — отмена
-        // и возврат. Пока пальцев два и больше, холст не рисуется.
-        #[cfg(target_os = "android")]
-        let gestures = self.gestures.update(ui.ctx());
-        #[cfg(target_os = "android")]
-        {
-            if let Some(undo) = gestures.undo {
-                if undo {
-                    self.undo();
-                } else {
-                    self.redo();
-                }
-            }
-            if gestures.multi {
-                // сдвиг — за серединой пальцев, масштаб и поворот — вокруг неё
-                let anchor = self.gestures.center().unwrap_or(rect.center());
-                let a = to_canvas(anchor, self.zoom, self.offset);
-                self.zoom = (self.zoom * gestures.zoom).clamp(0.02, 32.0);
-                if gestures.rotate != 0.0 {
-                    self.view_angle += gestures.rotate;
-                }
-                self.offset += a - to_canvas(anchor, self.zoom, self.offset);
-                self.offset -= ViewXf::new(rect, self.zoom, self.offset, self.view_angle, self.view_flip).vec_to_canvas(gestures.pan);
-                if gestures.second_landed {
-                    // второй палец лёг во время мазка — мазок убрать, палец тут не рисует
-                    self.cancel_touch_stroke();
-                }
-            }
-        }
-        #[cfg(target_os = "android")]
-        let gesture_pan = gestures.multi;
         for (phase, force) in touches {
-            #[cfg(target_os = "android")]
-            {
-                self.touch_eraser = pen.eraser;
-                // касание от пера или от пальца: StylusOnDemand-устройства дают type;
-                // на остальных палец и перо неразличимы и стилусом считается то,
-                // что принесло нажим (S Pen сообщает его, палец — нет)
-                let stylus = pen.stylus || pen.tilt > 0.0 || force.is_some_and(|f| f > 0.0 && f < 0.99);
-                if matches!(phase, egui::TouchPhase::Start) {
-                    self.android_stylus_touch = stylus;
-                }
-                // Android отдаёт наклон в радианах от нормали; движок SAI ждёт долю 0..1
-                // (60° и больше — единица) и направление в плоскости.
-                self.touch_tilt = if pen.stylus {
-                    [(pen.tilt.to_degrees() / 60.0).clamp(0.0, 1.0), pen.orientation, 0.0]
-                } else {
-                    [0.0; 3]
-                };
-                if pen.seq != self.last_pen_seq {
-                    self.last_pen_seq = pen.seq;
-                    let buttons_changed = pen.buttons != self.last_pen_buttons;
-                    if (pen.stylus || pen.buttons != 0)
-                        && (buttons_changed || self.last_pen_log_at.elapsed() >= Duration::from_secs(1))
-                    {
-                        log::info!(
-                            "перо: наклон={:.1}° напр={:.1}° кнопки={:#x} action={:#x} ластик={}",
-                            pen.tilt.to_degrees(),
-                            pen.orientation.to_degrees(),
-                            pen.buttons,
-                            pen.action_button,
-                            pen.eraser
-                        );
-                        self.last_pen_buttons = pen.buttons;
-                        self.last_pen_log_at = Instant::now();
-                    }
-                }
-            }
             match phase {
                 egui::TouchPhase::Start | egui::TouchPhase::Move => {
                     self.touch_down = true;
                     match force {
-                        Some(f) => {
-                            let f = f.clamp(0.0, 1.0);
-                            #[cfg(target_os = "android")]
-                            if (f - self.last_force_log).abs() > 0.04
-                                && self.last_force_log_at.elapsed() >= Duration::from_millis(300)
-                            {
-                                log::info!("касание: force={f:.3}");
-                                self.last_force_log = f;
-                                self.last_force_log_at = Instant::now();
-                            }
-                            self.touch_force = Some(f);
-                        }
+                        Some(f) => self.touch_force = Some(f.clamp(0.0, 1.0)),
                         // Перо уже известно, а силы нет — это касание легче первого уровня нажима.
                         None if self.touch_force.is_some() => self.touch_force = Some(0.0),
                         None => {}
@@ -11048,7 +10752,7 @@ app.open_canvas_dialog(d == "resolution")
                 self.offset += anchor - to_canvas(pos, self.zoom, self.offset);
             }
         }
-        let panning = middle || space || self.tool == Tool::Hand || self.android_pan_toggle;
+        let panning = middle || space || self.tool == Tool::Hand;
         let ctrl = ui.input(|i| i.modifiers.command);
         if self.puppet_takes_mouse(pressed && response.hovered() && !panning) {
             // марионетка: булавки
@@ -11149,19 +10853,8 @@ app.open_canvas_dialog(d == "resolution")
                 self.end_move();
             }
         } else if panning && (response.dragged() || middle) {
-            // сдвиг вида: за этим кадром пальца, а если egui движение уже поглотил — за
-            // разницей между новым и старым положением указателя
-            let mut delta = ui.input(|i| i.pointer.delta());
-            #[cfg(target_os = "android")]
-            if delta == Vec2::ZERO {
-                delta = mobile::touch_pan_delta(ui).unwrap_or_default();
-            }
+            let delta = ui.input(|i| i.pointer.delta());
             self.offset -= ViewXf::new(rect, self.zoom, self.offset, vang, vflip).vec_to_canvas(delta);
-            // «Рука» одноразовая: следующий штрих снова рисует (как пробел на компьютере)
-            #[cfg(target_os = "android")]
-            if released && self.android_pan_toggle {
-                self.android_pan_toggle = false;
-            }
         } else if self.tool == Tool::RotateView {
             if response.double_clicked() {
                 self.rotate_view(0.0);
@@ -11326,17 +11019,6 @@ app.open_canvas_dialog(d == "resolution")
                 let c = to_canvas(pos, self.zoom, self.offset);
                 self.pick_color(c.x, c.y);
             }
-        } else if {
-            #[cfg(target_os = "android")]
-            {
-                gesture_pan
-            }
-            #[cfg(not(target_os = "android"))]
-            {
-                false
-            }
-        } {
-            // двумя пальцами вид уже сдвинут выше — рисовать тут нечем
         } else if !panning {
             let (pressure, eraser_end) = self.pressure();
             // точка пера — середина пикселя экрана под ним, как в SAI (позиция указателя — угол)
@@ -13610,7 +13292,6 @@ impl eframe::App for PaintApp {
         let _frame_timer = self.frame_stats.clone().filter(|_| self.live.is_some()).map(|s| FrameTimer(s, Instant::now()));
         self.ctx = Some(ctx.clone());
         self.poll_file_dialog();
-        self.android_access_tick(ctx);
         self.check_exit(ctx);
         self.autosave();
         self.check_studio(ctx);
@@ -14131,13 +13812,8 @@ impl eframe::App for PaintApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.last_title = title;
         }
-        egui::TopBottomPanel::top("menu").show_animated(ctx, !self.android_phone, |ui| self.menu_bar(ui));
-        // Телефон во всю панель: верхняя строка сдвинута из-под выреза камеры.
-        #[cfg(target_os = "android")]
-        if self.android_phone {
-            self.android_update_insets(ctx);
-        }
-        egui::TopBottomPanel::bottom("status").show_animated(ctx, self.win.show[6] && !self.android_phone, |ui| {
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| self.menu_bar(ui));
+        egui::TopBottomPanel::bottom("status").show_animated(ctx, self.win.show[6], |ui| {
             ui.horizontal(|ui| {
                 if let Some(r) = &self.rec {
                     ui.colored_label(Color32::from_rgb(220, 50, 50), format!("● REC {}", recording::size_text(r.bytes()))).on_hover_text(r.path.display().to_string());
@@ -14195,16 +13871,6 @@ impl eframe::App for PaintApp {
         }
         let side = |right: bool, id: &'static str| if right { egui::SidePanel::right(id) } else { egui::SidePanel::left(id) };
         let docked = self.win.dock && !self.win.panels_hidden;
-        // При телефоне две колонки панелей не помещаются: их место занимает
-        // мобильный интерфейс (верхняя полоска и листы снизу, см. mobile.rs).
-        // Переключатель — «Окно → Телефонный интерфейс» (android_phone).
-        #[cfg(target_os = "android")]
-        if self.android_phone {
-            self.android_phone_ui(ctx, docked);
-            self.after_canvas(ctx);
-            return;
-        }
-        let _ = &side;
         if !self.win.panels_hidden {
             let full = self.win.show;
             // отделённые панели — в своих окнах, в главном их место освобождается
@@ -14281,14 +13947,6 @@ impl eframe::App for PaintApp {
                 .frame(egui::Frame::none())
                 .show(ctx, |ui| self.canvas(ui));
         }
-        self.after_canvas(ctx);
-    }
-}
-
-impl PaintApp {
-    /// После холста, тем же путём на компьютере и на телефоне: плавающий вид,
-    /// диалоги, пересчёт плиток.
-    fn after_canvas(&mut self, ctx: &egui::Context) {
         if let Some(mut fv) = self.float_view {
             // плавающий вид рисуется тем же холстом со своим масштабом, сдвигом и поворотом
             let mut open = true;
@@ -14463,81 +14121,6 @@ fn run_with(renderer: eframe::Renderer, path: Option<PathBuf>) -> eframe::Result
             if auto && app.check_updates {
                 update::check(&app.update, &cc.egui_ctx);
             }
-            Ok(Box::new(app))
-        }),
-    )
-}
-
-/// Android: приложение целиком (тот же `PaintApp`, что и на рабочем столе).
-///
-/// Вызывается из `.so` точки входа `android_main`. Winit на Android требует
-/// вручную передать `AndroidApp` в конструктор event loop — это делает
-/// `event_loop_builder` ниже. Остальной код редактора не знает о платформе.
-#[cfg(target_os = "android")]
-pub fn run_android(app: winit::platform::android::activity::AndroidApp) -> eframe::Result<()> {
-    use winit::platform::android::EventLoopBuilderExtAndroid;
-
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("GrazySAI"),
-    );
-    // Паника в UI должна быть видна в `logcat`, а не только в stderr.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        log::error!("GrazySAI panic: {info}");
-        default_hook(info);
-    }));
-
-    #[cfg(target_os = "android")]
-    android_shell::immersive_fullscreen();
-    let data_dir = app.internal_data_path();
-    let external_dir = app.external_data_path();
-    if let Some(dir) = &external_dir {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Some(dir) = &data_dir {
-        let _ = std::env::set_current_dir(dir);
-        // Настройки и eframe ищут домашний каталог через HOME/XDG — на Android его нет.
-        std::env::set_var("HOME", dir);
-        let config = dir.join("config");
-        let _ = std::fs::create_dir_all(&config);
-        std::env::set_var("XDG_CONFIG_HOME", &config);
-    }
-
-    let mut options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("GrazySAI"),
-        persist_window: false,
-        persistence_path: data_dir.map(|d| d.join("window.ron")),
-        // WGPU на Android поднимается не на всех устройствах; OpenGL доступен почти везде.
-        renderer: eframe::Renderer::Glow,
-        ..Default::default()
-    };
-    options.event_loop_builder = Some(Box::new(move |builder| {
-        builder.with_android_app(app.clone());
-    }));
-
-    eframe::run_native(
-        "GrazySAI",
-        options,
-        Box::new(move |cc| {
-            i18n::install_fonts(&cc.egui_ctx);
-            let feed = pen::new_feed();
-            let mut app = PaintApp::new(None, feed.clone());
-            pen::spawn(feed, cc.egui_ctx.clone());
-            sai_ui::apply_style(&cc.egui_ctx);
-            // Self-update impossible on Android.
-            app.check_updates = false;
-            // Системных диалогов нет — используем встроенный FileViewer из SAI.
-            app.always_viewer = true;
-            app.android_all_files = android_shell::all_files_access();
-            app.android_roots = android_shell::roots();
-            if app.android_all_files {
-                app.viewer_dir = app.android_roots.first().cloned();
-            } else {
-                app.status = tr("Файл → «Доступ ко всем папкам…» — откроет Download и остальную память").to_string();
-            }
-            app.android_external_dir = external_dir;
             Ok(Box::new(app))
         }),
     )

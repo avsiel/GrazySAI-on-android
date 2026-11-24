@@ -50,23 +50,6 @@ pub(crate) fn default_layout(tools_right: bool, layers_right: bool) -> DockState
     d
 }
 
-/// Раскладка для телефона: холст во всю ширину, панели — вкладками снизу.
-///
-/// Десктопные две колонки (навигатор+слои и цвет+инструменты) на узком экране
-/// занимают всю ширину, и рисовать становится негде — в портрете холст
-/// оставался нулевой ширины. Боковой столбец тоже не выход: четыре вкладки
-/// в него не влезают, а холст сужается. Поэтому панели — нижний лист с
-/// вкладками, а ширину холста не отнимает никто.
-pub(crate) fn phone_layout() -> DockState<Tab> {
-    let mut d = DockState::new(vec![Tab::Canvas]);
-    d.main_surface_mut().split_below(
-        NodeIndex::root(),
-        0.62,
-        vec![Tab::Color, Tab::Tools, Tab::Layers, Tab::Navigator],
-    );
-    d
-}
-
 /// Что пишется в настройки: дерево вкладок и места плавающих окон (egui_dock 0.14 их не
 /// записывает).
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -139,8 +122,7 @@ impl TabViewer for Viewer<'_> {
         };
         // во вкладке — только эта панель (как у отделённой панели);
         // виджеты SAI — постоянной ширины: в узкой вкладке прокрутка, а не наезд
-        // на телефоне столбец узкий: панель прокручивается, но не отнимает холст
-        ui.set_min_width(if cfg!(target_os = "android") { 160.0 } else if i >= 2 { 220.0 } else { 170.0 });
+        ui.set_min_width(if i >= 2 { 220.0 } else { 170.0 });
         if i >= 2 {
             self.app.left_panel(ui, i == 2, i == 3);
         } else {

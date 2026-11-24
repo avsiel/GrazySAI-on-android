@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/paint-core", "crates/paint-cli", "crates/paint-formats", "crates/paint-brush", "crates/paint-studio", "crates/paint-plugin", "crates/paint-3d", "crates/pen-test", "crates/paint-app", "crates/virtual-tablet", "crates/paint-convert", "crates/paint-android-full"]
+members = ["crates/paint-core", "crates/paint-cli", "crates/paint-formats", "crates/paint-brush", "crates/paint-studio", "crates/paint-plugin", "crates/paint-3d", "crates/pen-test", "crates/paint-app", "crates/virtual-tablet", "crates/paint-convert"]
 exclude = ["vendor/egui-wgpu"]
 
 [workspace.package]
@@ -22,7 +22,3 @@ todo = "warn"
 # Своя копия egui-wgpu 0.29.1 с одной правкой (vendor/egui-wgpu/PATCHED.md)
 [patch.crates-io]
 egui-wgpu = { path = "vendor/egui-wgpu" }
-rfd = { path = "vendor/rfd" }
-arboard = { path = "vendor/arboard" }
-# Своя копия winit 0.30.13: экспорт наклона и кнопок пера из MotionEvent (см. PATCHED.md)
-winit = { path = "vendor/winit" }

@@ -9,9 +9,3 @@ fuzz-*.log
 plugins/examples/*/target/
 plugins/examples/*/Cargo.lock
 fuzz/*.log
-
-# Android-сборка
-/android/build/
-/android/jniLibs/
-/GrazySAI-android.apk
-/GrazySAI-android.apk.idsig

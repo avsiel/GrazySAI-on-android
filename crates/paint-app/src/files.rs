@@ -62,11 +62,6 @@ pub enum Answer {
 }
 
 pub fn native() -> bool {
-    // На Android нет системного desktop-окна: rfd здесь заглушка. Сразу говорим «нет»,
-    // чтобы редактор открыл свой FileViewer (включённый принудительно в run_android).
-    if cfg!(target_os = "android") {
-        return false;
-    }
     std::env::var("PAINT_NATIVE_DIALOGS").map_or(true, |v| v != "off")
 }
 
