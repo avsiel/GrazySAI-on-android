@@ -1,32 +1,59 @@
-//! GrazySAI: дополнительные данные пера из `MotionEvent`, которые winit выбрасывает
-//! при преобразовании в `WindowEvent::Touch` (там есть только позиция и сила нажима).
+//! GrazySAI: данные пера/инструмента из Android MotionEvent.
 //!
-//! Состояние обновляется прямо в `handle_input_event`, до вызова пользовательского callback,
-//! поэтому в момент обработки `egui::Event::Touch` оно соответствует текущему событию.
+//! Winit теряет tool type/tilt/buttons при конвертации в WindowEvent::Touch.
+//! Сохраняем per-pointer состояние и глобальный снимок последнего события.
 
 use android_activity::input::{Axis, Button, MotionEvent, Pointer, ToolType};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Данные пера для последнего MotionEvent.
+/// Тип инструмента Android MotionEvent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolKind {
+    #[default]
+    Unknown,
+    Finger,
+    Stylus,
+    Eraser,
+}
+
+/// Данные последнего MotionEvent (глобально, для совместимости).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PenState {
-    /// Наклон от нормали к поверхности, радианы (`AMOTION_EVENT_AXIS_TILT`).
+    /// Наклон от нормали, радианы.
     pub tilt: f32,
-    /// Направление наклона в плоскости экрана, радианы (`AMOTION_EVENT_AXIS_ORIENTATION`).
+    /// Направление наклона, радианы.
     pub orientation: f32,
-    /// Биты нажатых кнопок (`AMOTION_EVENT_BUTTON_*`).
+    /// Биты кнопок.
     pub buttons: u32,
-    /// Кнопка, которой начато событие (`action_button`).
+    /// Кнопка, вызвавшая событие.
     pub action_button: u32,
-    /// Инструмент — перо или ластик (не палец).
+    /// Событие от стилуса/ластика.
     pub stylus: bool,
-    /// Ластик: обратный конец пера или вторая кнопка (Primary — тоже считаем).
+    /// Ластик стилуса.
     pub eraser: bool,
-    /// Увеличивается на каждом событии: приложение отличает новое событие от старого.
+    /// Монотонный счётчик событий.
+    pub seq: u64,
+    /// Тип инструмента текущего pointer.
+    pub tool: ToolKind,
+    /// Android pointer id текущего pointer.
+    pub pointer_id: i32,
+}
+
+/// Снимок состояния конкретного pointer.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PointerState {
+    pub tool: ToolKind,
+    pub tilt: f32,
+    pub orientation: f32,
+    pub buttons: u32,
+    pub action_button: u32,
+    pub stylus: bool,
+    pub eraser: bool,
     pub seq: u64,
 }
 
-const INITIAL: PenState = PenState {
+static STATE: Mutex<PenState> = Mutex::new(PenState {
     tilt: 0.0,
     orientation: 0.0,
     buttons: 0,
@@ -34,35 +61,93 @@ const INITIAL: PenState = PenState {
     stylus: false,
     eraser: false,
     seq: 0,
-};
+    tool: ToolKind::Unknown,
+    pointer_id: -1,
+});
 
-static STATE: Mutex<PenState> = Mutex::new(INITIAL);
+static POINTERS: Mutex<Option<HashMap<i32, PointerState>>> = Mutex::new(None);
 
-/// Обновить состояние из сырого события Android (вызывается в backend'е).
-pub(crate) fn update(event: &MotionEvent<'_>, pointer: &Pointer<'_>) {
-    let buttons = event.button_state();
-    let action: u32 = event.action_button().into();
-    // Некоторые перья сообщают ластик только через ToolType, другие — через кнопки.
-    // Классический ластик — обратный конец пера или вторая кнопка. Первая кнопка отдельно
-    // доступна через `buttons`/`action_button`: приложение может назначить её ластиком в настройках.
+fn tool_kind(
+    pointer: &Pointer<'_>,
+    buttons: android_activity::input::ButtonState,
+    action: u32,
+) -> ToolKind {
     let eraser = matches!(pointer.tool_type(), ToolType::Eraser)
         || buttons.stylus_secondary()
         || action == u32::from(Button::StylusSecondary);
+    if eraser {
+        return ToolKind::Eraser;
+    }
+    let stylus = matches!(pointer.tool_type(), ToolType::Stylus)
+        || buttons.stylus_primary()
+        || action == u32::from(Button::StylusPrimary);
+    if stylus {
+        return ToolKind::Stylus;
+    }
+    match pointer.tool_type() {
+        ToolType::Finger => ToolKind::Finger,
+        _ => ToolKind::Unknown,
+    }
+}
+
+/// Обновить состояние для pointer Android.
+pub(crate) fn update(event: &MotionEvent<'_>, pointer: &Pointer<'_>) {
+    let buttons = event.button_state();
+    let action: u32 = event.action_button().into();
+    let kind = tool_kind(pointer, buttons, action);
+    let eraser = kind == ToolKind::Eraser;
+    let stylus = matches!(kind, ToolKind::Stylus | ToolKind::Eraser);
+
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.tilt = pointer.axis_value(Axis::Tilt);
     s.orientation = pointer.axis_value(Axis::Orientation);
     s.buttons = buttons.0;
     s.action_button = action;
-    s.stylus = matches!(pointer.tool_type(), ToolType::Stylus | ToolType::Eraser)
-        || buttons.stylus_primary()
-        || buttons.stylus_secondary()
-        || action == u32::from(Button::StylusPrimary)
-        || action == u32::from(Button::StylusSecondary);
+    s.stylus = stylus;
     s.eraser = eraser;
     s.seq = s.seq.wrapping_add(1);
+    s.tool = kind;
+    s.pointer_id = pointer.pointer_id();
+    let snapshot = PointerState {
+        tool: kind,
+        tilt: s.tilt,
+        orientation: s.orientation,
+        buttons: s.buttons,
+        action_button: s.action_button,
+        stylus,
+        eraser,
+        seq: s.seq,
+    };
+    drop(s);
+
+    let mut map = POINTERS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = map.get_or_insert_with(HashMap::new);
+    map.insert(pointer.pointer_id(), snapshot);
 }
 
-/// Снимок состояния пера (потокобезопасный, без блокировки на стороне приложения).
+/// Удалить pointer (Up/Cancel).
+pub(crate) fn remove(pointer_id: i32) {
+    let mut map = POINTERS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = map.as_mut() {
+        map.remove(&pointer_id);
+    }
+}
+
+/// Очистить все pointer-ы (Cancel/focus loss).
+pub(crate) fn clear() {
+    let mut map = POINTERS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = map.as_mut() {
+        map.clear();
+    }
+}
+
+/// Последний глобальный снимок (совместимость).
 pub fn state() -> PenState {
     *STATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Снимок для конкретного Android pointer id.
+pub fn pointer_state(pointer_id: i32) -> Option<PointerState> {
+    let map = POINTERS.lock().unwrap_or_else(|e| e.into_inner());
+    map.as_ref().and_then(|m| m.get(&pointer_id).copied())
 }

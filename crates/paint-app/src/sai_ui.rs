@@ -3,7 +3,113 @@
 //! значки инструментов, нарисованные линиями.
 
 use eframe::egui::{self, Color32, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
+use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
+use std::sync::Mutex;
+
+/// Растровые значки из оригинального PaintTool SAI 2 (`assets/icons/*.rgba`).
+/// Файлы собраны из переименованных PNG в `named/`, см. `assets/icons/MAP.txt`.
+static RASTER: Mutex<Option<HashMap<String, egui::TextureHandle>>> = Mutex::new(None);
+
+fn raster_bytes(name: &str) -> Option<&'static [u8]> {
+    Some(match name {
+        "select" => include_bytes!("../assets/icons/select.rgba"),
+        "lasso" => include_bytes!("../assets/icons/lasso.rgba"),
+        "wand" => include_bytes!("../assets/icons/wand.rgba"),
+        "brush" => include_bytes!("../assets/icons/brush.rgba"),
+        "text" => include_bytes!("../assets/icons/text.rgba"),
+        "zoom" => include_bytes!("../assets/icons/zoom.rgba"),
+        "picker" => include_bytes!("../assets/icons/picker.rgba"),
+        "water" => include_bytes!("../assets/icons/water.rgba"),
+        "pen" => include_bytes!("../assets/icons/pen.rgba"),
+        "eraser" => include_bytes!("../assets/icons/eraser.rgba"),
+        "selpen" => include_bytes!("../assets/icons/selpen.rgba"),
+        "selers" => include_bytes!("../assets/icons/selers.rgba"),
+        "binary" | "pixelpen" => include_bytes!("../assets/icons/binary.rgba"),
+        "effectpen" | "airbrush" => include_bytes!("../assets/icons/effectpen.rgba"),
+        "blur" => include_bytes!("../assets/icons/blur.rgba"),
+        "smudge" => include_bytes!("../assets/icons/smudge.rgba"),
+        "stabilizer" => include_bytes!("../assets/icons/stabilizer.rgba"),
+        "lassofill" => include_bytes!("../assets/icons/lassofill.rgba"),
+        "bucket" => include_bytes!("../assets/icons/bucket.rgba"),
+        "gradient" => include_bytes!("../assets/icons/gradient.rgba"),
+        "curve" => include_bytes!("../assets/icons/curve.rgba"),
+        "line" => include_bytes!("../assets/icons/line.rgba"),
+        "line_width" => include_bytes!("../assets/icons/line_width.rgba"),
+        "control_points" => include_bytes!("../assets/icons/control_points.rgba"),
+        "line_color" => include_bytes!("../assets/icons/line_color.rgba"),
+        "hardness" => include_bytes!("../assets/icons/hardness.rgba"),
+        "marker" => include_bytes!("../assets/icons/marker.rgba"),
+        "brush_shape" => include_bytes!("../assets/icons/brush_shape.rgba"),
+        "rotate" => include_bytes!("../assets/icons/rotate.rgba"),
+        "hand" => include_bytes!("../assets/icons/hand.rgba"),
+        "undo" => include_bytes!("../assets/icons/undo.rgba"),
+        "redo" => include_bytes!("../assets/icons/redo.rgba"),
+        "minus" => include_bytes!("../assets/icons/minus.rgba"),
+        "plus" => include_bytes!("../assets/icons/plus.rgba"),
+        "ccw" => include_bytes!("../assets/icons/ccw.rgba"),
+        "cw" => include_bytes!("../assets/icons/cw.rgba"),
+        "eye" => include_bytes!("../assets/icons/eye.rgba"),
+        "eye_off" => include_bytes!("../assets/icons/eye_off.rgba"),
+        "clip" => include_bytes!("../assets/icons/clip.rgba"),
+        "cv_wheel" => include_bytes!("../assets/icons/cv_wheel.rgba"),
+        "cv_rgb" => include_bytes!("../assets/icons/cv_rgb.rgba"),
+        "cv_hsv" => include_bytes!("../assets/icons/cv_hsv.rgba"),
+        "cv_mixer" => include_bytes!("../assets/icons/cv_mixer.rgba"),
+        "cv_swatches" => include_bytes!("../assets/icons/cv_swatches.rgba"),
+        "cv_scratch" => include_bytes!("../assets/icons/cv_scratch.rgba"),
+        "lock" | "lock_alpha" | "lock_paint" | "lock_all" => include_bytes!("../assets/icons/lock.rgba"),
+        "folder" | "new_folder" => include_bytes!("../assets/icons/folder.rgba"),
+        _ => return None,
+    })
+}
+
+pub fn raster_texture(ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+    let bytes = raster_bytes(name)?;
+    let mut cache = RASTER.lock().ok()?;
+    let map = cache.get_or_insert_with(HashMap::new);
+    if let Some(t) = map.get(name) {
+        return Some(t.clone());
+    }
+    let w = u32::from_le_bytes(bytes[0..4].try_into().ok()?) as usize;
+    let h = u32::from_le_bytes(bytes[4..8].try_into().ok()?) as usize;
+    if bytes.len() < 8 + w * h * 4 {
+        return None;
+    }
+    let img = egui::ColorImage::from_rgba_unmultiplied([w, h], &bytes[8..8 + w * h * 4]);
+    let tex = ctx.load_texture(format!("sai2-{name}"), img, egui::TextureOptions::NEAREST);
+    map.insert(name.to_owned(), tex.clone());
+    Some(tex)
+}
+
+/// Рисует растровый значок вместо векторного; false — значка нет, нужен запасной vector.
+/// По умолчанию сохраняем оригинальные цвета SAI-иконки; для отключённых — приглушаем.
+fn draw_raster(p: &Painter, r: Rect, c: Color32, name: &str) -> bool {
+    let Some(tex) = raster_texture(p.ctx(), name) else {
+        return false;
+    };
+    let tint = if c == dim() {
+        if matches!(name, "plus" | "minus" | "ccw" | "cw" | "rotate" | "undo" | "redo") {
+            Color32::from_rgba_unmultiplied(20, 20, 20, 90)
+        } else {
+            Color32::from_white_alpha(96)
+        }
+    } else if matches!(name, "plus" | "minus" | "ccw" | "cw" | "rotate" | "undo" | "redo") {
+        // эти PNG из SAI белые — не зависим от переданного цвета, всегда берём контрастную типографику
+        gray(20)
+    } else {
+        Color32::WHITE
+    };
+    let side = r.width().min(r.height());
+    let square = Rect::from_center_size(r.center(), Vec2::splat(side));
+    p.image(
+        tex.id(),
+        square,
+        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+        tint,
+    );
+    true
+}
 
 static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -339,107 +445,97 @@ pub fn dashed_rect(p: &Painter, r: Rect, stroke: Stroke) {
     }
 }
 
-/// Значки общих инструментов и кнопок, нарисованные линиями.
+/// Значки общих инструментов и кнопок: сначала растровый оригинал SAI 2, иначе векторный запасной.
 pub fn glyph(p: &Painter, r: Rect, c: Color32, name: &str) {
+    if draw_raster(p, r, c, name) {
+        return;
+    }
+    vector_glyph(p, r, c, name);
+}
+
+/// Векторные запасные значки (для тех, у кого пока нет растрового оригинала).
+fn vector_glyph(p: &Painter, r: Rect, c: Color32, name: &str) {
     let s = Stroke::new(1.3_f32, c);
     let ctr = r.center();
     let k = r.width().min(r.height()) / 2.0;
-    match name {
-        "select" => {
-            let q = r.shrink(1.0);
-            for (a, b) in [
-                (q.left_top(), q.right_top()),
-                (q.right_top(), q.right_bottom()),
-                (q.right_bottom(), q.left_bottom()),
-                (q.left_bottom(), q.left_top()),
-            ] {
-                let n = 4;
-                for i in 0..n {
-                    if i % 2 == 0 {
-                        p.line_segment(
-                            [
-                                a + (b - a) * (i as f32 / n as f32),
-                                a + (b - a) * ((i + 1) as f32 / n as f32),
-                            ],
-                            s,
-                        );
-                    }
-                }
+    match name {        "select" => {
+            let q = r.shrink(2.0);
+            let pts = [q.left_top(), q.right_top(), q.right_bottom(), q.left_bottom(), q.left_top()];
+            for w in pts.windows(2) {
+                p.extend(Shape::dashed_line(&[w[0], w[1]], s, 3.0, 2.0));
+            }
+            let hs = 2.0;
+            for cpt in [q.left_top(), q.right_top(), q.right_bottom(), q.left_bottom()] {
+                p.rect_filled(Rect::from_center_size(cpt, Vec2::splat(hs * 2.0)), 0.0, c);
             }
         }
         "lasso" => {
-            let pts: Vec<Pos2> = (0..=24)
+            let pts: Vec<Pos2> = (0..=32)
                 .map(|i| {
-                    let t = i as f32 / 24.0 * TAU;
-                    ctr + Vec2::new(t.cos() * k * 0.9, t.sin() * k * 0.55 - k * 0.2)
+                    let t = i as f32 / 32.0 * std::f32::consts::TAU * 0.82;
+                    ctr + Vec2::new(t.cos() * k * 0.78, t.sin() * k * 0.58 - k * 0.08)
                 })
                 .collect();
             p.add(Shape::line(pts, s));
-            p.line_segment(
-                [
-                    ctr + Vec2::new(-k * 0.2, k * 0.3),
-                    ctr + Vec2::new(-k * 0.5, k * 0.9),
-                ],
-                s,
-            );
+            let tip = ctr + Vec2::new(-k * 0.38, k * 0.88);
+            p.line_segment([ctr + Vec2::new(-k * 0.08, k * 0.28), tip], s);
+            p.circle_filled(tip, 1.6, c);
         }
         "wand" => {
             p.line_segment(
-                [
-                    ctr + Vec2::new(-k * 0.8, k * 0.8),
-                    ctr + Vec2::new(k * 0.2, -k * 0.2),
-                ],
-                Stroke::new(2.0_f32, c),
+                [ctr + Vec2::new(-k * 0.75, k * 0.75), ctr + Vec2::new(k * 0.15, -k * 0.15)],
+                Stroke::new(2.2, c),
             );
+            p.circle_filled(ctr + Vec2::new(k * 0.35, -k * 0.35), 1.5, c);
             for a in 0..4 {
                 let t = a as f32 * PI / 2.0 + PI / 4.0;
-                let o = ctr + Vec2::new(k * 0.45, -k * 0.45);
-                p.line_segment([o, o + Vec2::new(t.cos(), t.sin()) * k * 0.4], s);
+                let o = ctr + Vec2::new(k * 0.5, -k * 0.5);
+                p.line_segment([o, o + Vec2::new(t.cos(), t.sin()) * k * 0.35], s);
             }
         }
         "bucket" => {
-            p.add(Shape::convex_polygon(
+            p.add(Shape::line(
                 vec![
-                    ctr + Vec2::new(-k * 0.6, -k * 0.1),
-                    ctr + Vec2::new(0.0, -k * 0.7),
-                    ctr + Vec2::new(k * 0.6, -k * 0.1),
-                    ctr + Vec2::new(0.0, k * 0.5),
+                    ctr + Vec2::new(-k * 0.55, -k * 0.1),
+                    ctr + Vec2::new(0.0, -k * 0.65),
+                    ctr + Vec2::new(k * 0.55, -k * 0.1),
+                    ctr + Vec2::new(k * 0.4, k * 0.55),
+                    ctr + Vec2::new(-k * 0.4, k * 0.55),
+                    ctr + Vec2::new(-k * 0.55, -k * 0.1),
                 ],
-                Color32::TRANSPARENT,
                 s,
             ));
-            p.circle_filled(ctr + Vec2::new(k * 0.7, k * 0.5), k * 0.2, c);
+            p.circle_stroke(ctr + Vec2::new(0.0, -k * 0.15), k * 0.35, Stroke::new(1.0, c));
+            p.circle_filled(ctr + Vec2::new(k * 0.65, k * 0.4), k * 0.18, c);
         }
         "text" => {
             p.text(
                 ctr,
                 egui::Align2::CENTER_CENTER,
                 "T",
-                egui::FontId::proportional(r.height() + 2.0),
+                egui::FontId::proportional(r.height() * 0.9),
                 c,
             );
         }
         "move" => {
-            p.line_segment([ctr - Vec2::X * k, ctr + Vec2::X * k], s);
-            p.line_segment([ctr - Vec2::Y * k, ctr + Vec2::Y * k], s);
+            let len = k * 0.95;
+            p.line_segment([ctr - Vec2::X * len, ctr + Vec2::X * len], s);
+            p.line_segment([ctr - Vec2::Y * len, ctr + Vec2::Y * len], s);
             for d in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
-                let tip = ctr + d * k;
-                let side = Vec2::new(-d.y, d.x) * k * 0.3;
+                let tip = ctr + d * len;
+                let side = Vec2::new(-d.y, d.x) * k * 0.32;
                 p.add(Shape::convex_polygon(
-                    vec![tip, tip - d * k * 0.35 + side, tip - d * k * 0.35 - side],
+                    vec![tip, tip - d * k * 0.3 + side, tip - d * k * 0.3 - side],
                     c,
                     Stroke::NONE,
                 ));
             }
         }
         "zoom" => {
-            p.circle_stroke(ctr + Vec2::new(-k * 0.2, -k * 0.2), k * 0.55, s);
+            p.circle_stroke(ctr + Vec2::new(-k * 0.15, -k * 0.15), k * 0.5, s);
             p.line_segment(
-                [
-                    ctr + Vec2::new(k * 0.2, k * 0.2),
-                    ctr + Vec2::new(k * 0.85, k * 0.85),
-                ],
-                Stroke::new(2.0_f32, c),
+                [ctr + Vec2::new(k * 0.25, k * 0.25), ctr + Vec2::new(k * 0.8, k * 0.8)],
+                Stroke::new(2.2, c),
             );
         }
         "rotate" | "undo" | "redo" | "ccw" | "cw" => {
@@ -469,56 +565,52 @@ pub fn glyph(p: &Painter, r: Rect, c: Color32, name: &str) {
             ));
         }
         "hand" => {
+            p.add(Shape::line(
+                vec![
+                    ctr + Vec2::new(-k * 0.45, k * 0.5),
+                    ctr + Vec2::new(-k * 0.45, -k * 0.1),
+                    ctr + Vec2::new(k * 0.45, -k * 0.1),
+                    ctr + Vec2::new(k * 0.45, k * 0.5),
+                ],
+                s,
+            ));
             for i in 0..4 {
-                let x = ctr.x - k * 0.5 + i as f32 * k * 0.33;
+                let x = ctr.x - k * 0.3 + i as f32 * k * 0.2;
                 p.line_segment(
                     [
-                        Pos2::new(x, ctr.y),
-                        Pos2::new(x, ctr.y - k * 0.8 + (i as f32 - 1.5).abs() * k * 0.15),
+                        Pos2::new(x, ctr.y - k * 0.1),
+                        Pos2::new(x, ctr.y - k * 0.75 + (i as f32).abs() * k * 0.05),
                     ],
                     s,
                 );
             }
-            p.add(Shape::line(
-                vec![
-                    ctr + Vec2::new(-k * 0.55, 0.0),
-                    ctr + Vec2::new(-k * 0.5, k * 0.6),
-                    ctr + Vec2::new(k * 0.5, k * 0.6),
-                    ctr + Vec2::new(k * 0.55, -k * 0.1),
-                ],
-                s,
-            ));
+            p.line_segment([ctr + Vec2::new(-k * 0.45, k * 0.15), ctr + Vec2::new(-k * 0.7, -k * 0.2)], s);
         }
         "picker" => {
             p.line_segment(
-                [
-                    ctr + Vec2::new(-k * 0.8, k * 0.8),
-                    ctr + Vec2::new(k * 0.3, -k * 0.3),
-                ],
-                Stroke::new(1.5_f32, c),
+                [ctr + Vec2::new(-k * 0.75, k * 0.75), ctr + Vec2::new(k * 0.1, -k * 0.1)],
+                Stroke::new(1.8, c),
             );
             p.line_segment(
-                [
-                    ctr + Vec2::new(k * 0.1, -k * 0.6),
-                    ctr + Vec2::new(k * 0.6, -k * 0.1),
-                ],
-                Stroke::new(3.0_f32, c),
+                [ctr + Vec2::new(k * 0.1, -k * 0.1), ctr + Vec2::new(k * 0.45, -k * 0.45)],
+                Stroke::new(2.8, c),
             );
+            p.circle_stroke(ctr + Vec2::new(-k * 0.3, k * 0.3), k * 0.15, s);
         }
         "minus" => {
             p.line_segment(
-                [ctr - Vec2::X * k * 0.6, ctr + Vec2::X * k * 0.6],
-                Stroke::new(2.0_f32, c),
+                [ctr - Vec2::X * k * 0.55, ctr + Vec2::X * k * 0.55],
+                Stroke::new(2.2, c),
             );
         }
         "plus" => {
             p.line_segment(
-                [ctr - Vec2::X * k * 0.6, ctr + Vec2::X * k * 0.6],
-                Stroke::new(2.0_f32, c),
+                [ctr - Vec2::X * k * 0.55, ctr + Vec2::X * k * 0.55],
+                Stroke::new(2.2, c),
             );
             p.line_segment(
-                [ctr - Vec2::Y * k * 0.6, ctr + Vec2::Y * k * 0.6],
-                Stroke::new(2.0_f32, c),
+                [ctr - Vec2::Y * k * 0.55, ctr + Vec2::Y * k * 0.55],
+                Stroke::new(2.2, c),
             );
         }
         "reset" => {
@@ -527,25 +619,25 @@ pub fn glyph(p: &Painter, r: Rect, c: Color32, name: &str) {
         "flip" => {
             p.add(Shape::convex_polygon(
                 vec![
-                    ctr + Vec2::new(-k, 0.0),
-                    ctr + Vec2::new(-k * 0.3, -k * 0.5),
-                    ctr + Vec2::new(-k * 0.3, k * 0.5),
+                    ctr + Vec2::new(-k * 0.9, 0.0),
+                    ctr + Vec2::new(-k * 0.25, -k * 0.45),
+                    ctr + Vec2::new(-k * 0.25, k * 0.45),
                 ],
                 c,
                 Stroke::NONE,
             ));
             p.add(Shape::convex_polygon(
                 vec![
-                    ctr + Vec2::new(k, 0.0),
-                    ctr + Vec2::new(k * 0.3, -k * 0.5),
-                    ctr + Vec2::new(k * 0.3, k * 0.5),
+                    ctr + Vec2::new(k * 0.9, 0.0),
+                    ctr + Vec2::new(k * 0.25, -k * 0.45),
+                    ctr + Vec2::new(k * 0.25, k * 0.45),
                 ],
                 c,
                 Stroke::NONE,
             ));
             p.line_segment(
-                [ctr - Vec2::X * k * 0.3, ctr + Vec2::X * k * 0.3],
-                Stroke::new(2.0_f32, c),
+                [ctr - Vec2::X * k * 0.25, ctr + Vec2::X * k * 0.25],
+                Stroke::new(2.0, c),
             );
         }
         "line" => {
@@ -560,12 +652,12 @@ pub fn glyph(p: &Painter, r: Rect, c: Color32, name: &str) {
         "eye" => {
             let pts: Vec<Pos2> = (0..=16)
                 .map(|i| {
-                    let t = i as f32 / 16.0 * TAU;
-                    ctr + Vec2::new(t.cos() * k * 0.9, t.sin() * k * 0.45)
+                    let t = i as f32 / 16.0 * std::f32::consts::TAU;
+                    ctr + Vec2::new(t.cos() * k * 0.85, t.sin() * k * 0.5)
                 })
                 .collect();
-            p.add(Shape::line(pts, Stroke::new(1.0_f32, c)));
-            p.circle_filled(ctr, k * 0.3, c);
+            p.add(Shape::line(pts, s));
+            p.circle_filled(ctr, k * 0.28, c);
         }
         "deselect" | "invert" => {
             glyph(p, r, c, "select");

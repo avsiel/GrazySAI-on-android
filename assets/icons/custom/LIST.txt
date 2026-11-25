@@ -1,0 +1,18 @@
+GrazySAI - иконки (Piskel / пиксель-арт)
+
+ФОРМАТ: PNG, RGBA, 18x18 px, прозрачный фон.
+Рисовать ЧЁРНЫМ (#000000) с разной прозрачностью (альфа) для оттенков -
+в коде иконка красится в цвет темы. Без белого фона, без рамки.
+Масштаб 1 пиксель = 1 пиксель, без сглаживания при экспорте.
+Имя файла = имя из списка ниже (например select.png).
+
+ПРИОРИТЕТ 1 (инструменты):
+  select lasso wand bucket text move zoom rotate hand picker
+ПРИОРИТЕТ 2 (кисти):
+  pen brush airbrush water marker eraser pixelpen effectpen scatter
+  blur smudge gradient binary binerase binselpen binselers lassofill
+ПРИОРИТЕТ 3 (всё остальное):
+  assets ccw clear cw delete deselect down export eye f_blur f_correct f_distort f_effect f_render f_sharpen flip flip_h flip_v gray invert line lock_all lock_alpha lock_paint lower mask merge minus new_folder new_layer new_linework plus redo reset ruler save sel_add sel_int sel_replace sel_sub selers selpen undo up view_float view_tab
+
+ВСЕ ИМЯ (в алфавитном порядке):
+  airbrush assets binary binerase binselers binselpen blur brush bucket ccw clear cw delete deselect down effectpen eraser export eye f_blur f_correct f_distort f_effect f_render f_sharpen flip flip_h flip_v gradient gray hand invert lasso lassofill line lock_all lock_alpha lock_paint lower marker mask merge minus move new_folder new_layer new_linework pen picker pixelpen plus redo reset rotate ruler save scatter sel_add sel_int sel_replace sel_sub select selers selpen smudge text undo up view_float view_tab wand water zoom

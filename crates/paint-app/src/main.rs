@@ -12,6 +12,7 @@ mod pen;
 mod ruler;
 mod sai_ui;
 mod keys;
+mod touch_gesture;
 mod settings;
 mod update;
 mod files;
@@ -1466,15 +1467,14 @@ struct PaintApp {
     /// Текущий мазок начат пером (касанием): до его конца нажим берётся от пера, даже когда
     /// касание уже кончилось — иначе последняя точка при отрыве шла бы с нажимом мыши 1,0.
     stroke_by_touch: bool,
-    /// ???????? ??????? (id, pos) ??? ??????.
-    gesture_touches: Vec<(u64, egui::Pos2)>,
-    gesture_prev: Option<(egui::Pos2, f32, f32)>,
-    /// ?????: ????? ??????, ????? ? ?????? ? ???????? ??????? ? ??? ???? ??????/????????.
-    gesture_time: f64,
-    gesture_centroid0: egui::Pos2,
-    gesture_moved: bool,
-    gesture_max: usize,
-    /// ????? ??????? ??????? ????? ?????? ?????????.
+    /// FSM для пальцевых жестов (пан/зум/тапы), отдельно от стилуса.
+    gesture_fsm: touch_gesture::TouchGestureFsm,
+    gesture_mode: touch_gesture::GestureSettings,
+    gesture_rotation: bool,
+    gesture_pan_zoom: bool,
+    /// Активные стилусные/ластиковые touch id (Android).
+    stylus_touches: HashSet<u64>,
+    /// Одним пальцем двигать холст вместо рисования.
     touch_pan_finger: bool,
     /// Последний использованный нажим — для строки состояния.
     last_pressure: f32,
@@ -1824,12 +1824,11 @@ impl PaintApp {
             touch_force: None,
             touch_down: false,
             stroke_by_touch: false,
-            gesture_touches: Vec::new(),
-            gesture_prev: None,
-            gesture_time: 0.0,
-            gesture_centroid0: egui::Pos2::ZERO,
-            gesture_moved: false,
-            gesture_max: 0,
+            gesture_fsm: touch_gesture::TouchGestureFsm::default(),
+            gesture_mode: touch_gesture::GestureSettings::PanZoom,
+            gesture_rotation: false,
+            gesture_pan_zoom: false,
+            stylus_touches: HashSet::new(),
             touch_pan_finger: false,
             last_pressure: 1.0,
             last_source: tr("мышь"),
@@ -5623,9 +5622,10 @@ app.open_canvas_dialog(d == "resolution")
         }
         let m = self.opts.min_pressure;
         let gate = |p: f32| ((p - m) / (1.0 - m)).max(0.0);
+        let stylus_active = !self.stylus_touches.is_empty();
         let (raw, pressure, eraser, source) = match (fresh, self.touch_force) {
             (Some((p, e)), _) => (p, gate(self.opts.pressure_curve.apply(p)), e, if api == "WinTab" { tr("перо (WinTab)") } else { tr("перо (XInput 2)") }),
-            (None, Some(f)) if self.touch_down || (self.stroke_by_touch && (self.live.is_some() || self.line_stroke.is_some() || self.sel_stroke.is_some() || self.mask_stroke.is_some())) => (f, gate(self.opts.pressure_curve.apply(f)), false, tr("перо (Windows Ink)")),
+            (None, Some(f)) if stylus_active || (self.stroke_by_touch && stylus_active) || (self.stroke_by_touch && (self.live.is_some() || self.line_stroke.is_some() || self.sel_stroke.is_some() || self.mask_stroke.is_some()) && self.touch_force.is_some()) => (f, gate(self.opts.pressure_curve.apply(f)), false, tr("перо (Windows Ink)")),
             _ => (1.0, 1.0, false, tr("мышь")),
         };
         // нажим слабее порога — перо будто не касается (мышь не в счёт)
@@ -8133,6 +8133,15 @@ app.open_canvas_dialog(d == "resolution")
                 if ui.checkbox(&mut self.touch_pan_finger, "One-finger pan").clicked() {
                     ui.close_menu();
                 }
+                ui.horizontal(|ui| {
+                    ui.label("Two-finger gestures");
+                    ui.selectable_value(&mut self.gesture_mode, touch_gesture::GestureSettings::PanZoom, "Pan+Zoom");
+                    ui.selectable_value(&mut self.gesture_mode, touch_gesture::GestureSettings::ZoomOnly, "Zoom");
+                    ui.selectable_value(&mut self.gesture_mode, touch_gesture::GestureSettings::PanOnly, "Pan");
+                });
+                if ui.checkbox(&mut self.gesture_rotation, "Two-finger rotate").clicked() {
+                    ui.close_menu();
+                }
                 ui.separator();
                 if ui.add(menu_item("Повернуть вид против часовой", "Shift+PageUp")).clicked() {
                     self.rotate_view(-15.0);
@@ -8340,6 +8349,15 @@ app.open_canvas_dialog(d == "resolution")
                     .on_hover_text("Move the canvas with one finger instead of drawing")
                     .changed()
                 {
+                    ui.close_menu();
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Two-finger gestures");
+                    ui.selectable_value(&mut self.gesture_mode, touch_gesture::GestureSettings::PanZoom, "Pan+Zoom");
+                    ui.selectable_value(&mut self.gesture_mode, touch_gesture::GestureSettings::ZoomOnly, "Zoom");
+                    ui.selectable_value(&mut self.gesture_mode, touch_gesture::GestureSettings::PanOnly, "Pan");
+                });
+                if ui.checkbox(&mut self.gesture_rotation, "Two-finger rotate").clicked() {
                     ui.close_menu();
                 }
                 if ui.add(menu_icons::button("GrazySAI на GitHub")).clicked() {
@@ -8581,56 +8599,23 @@ app.open_canvas_dialog(d == "resolution")
         // Переключатели панели цвета, как у образца: круг, ползунки RGB, ползунки HSV — каждый
         // показывается или прячется отдельно.
         ui.horizontal(|ui| {
-            let b = Vec2::splat(18.0);
-            if sai_ui::icon_button(ui, b, self.color_views[0], true, tr("Цветовой круг"), |p, r, _| {
-                p.circle_stroke(r.center(), r.width() / 2.0, egui::Stroke::new(2.0_f32, Color32::from_rgb(200, 80, 160)));
-            })
-            .clicked()
-            {
-                self.color_views[0] = !self.color_views[0];
-            }
-            for (i, tip) in [(1, tr("Ползунки RGB")), (2, tr("Ползунки HSV"))] {
+            let b = Vec2::new(22.0, 18.0);
+            let views: [(&str, &str); 6] = [
+                ("cv_wheel", tr("Цветовой круг")),
+                ("cv_rgb", tr("Ползунки RGB")),
+                ("cv_hsv", tr("Ползунки HSV")),
+                ("cv_mixer", tr("Смеситель цвета")),
+                ("cv_swatches", tr("Образцы цвета")),
+                ("cv_scratch", tr("Черновик")),
+            ];
+            for (i, (icon, tip)) in views.into_iter().enumerate() {
                 if sai_ui::icon_button(ui, b, self.color_views[i], true, tip, |p, r, c| {
-                    for k in 0..3 {
-                        let y = r.top() + 2.0 + k as f32 * 4.0;
-                        p.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], egui::Stroke::new(1.5_f32, c));
-                    }
+                    sai_ui::glyph(p, r, c, icon);
                 })
                 .clicked()
                 {
                     self.color_views[i] = !self.color_views[i];
                 }
-            }
-            if sai_ui::icon_button(ui, b, self.color_views[3], true, tr("Смеситель цвета"), |p, r, c| {
-                for k in 0..4 {
-                    let y = r.top() + 2.0 + k as f32 * 3.5;
-                    p.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], egui::Stroke::new(1.5_f32, c));
-                }
-            })
-            .clicked()
-            {
-                self.color_views[3] = !self.color_views[3];
-            }
-            if sai_ui::icon_button(ui, b, self.color_views[4], true, tr("Образцы цвета"), |p, r, c| {
-                for k in 0..3 {
-                    for j in 0..3 {
-                        let q = Rect::from_min_size(r.min + Vec2::new(j as f32 * 6.0, k as f32 * 6.0), Vec2::splat(4.5));
-                        p.rect_filled(q, 0.0, c);
-                    }
-                }
-            })
-            .clicked()
-            {
-                self.color_views[4] = !self.color_views[4];
-            }
-            if sai_ui::icon_button(ui, b, self.color_views[5], true, tr("Черновик"), |p, r, c| {
-                p.rect_stroke(r.shrink(1.0), 0.0, egui::Stroke::new(1.0_f32, c));
-                let pts: Vec<Pos2> = (0..=8).map(|i| Pos2::new(r.left() + 3.0 + i as f32 * (r.width() - 6.0) / 8.0, r.center().y + ((i as f32) * 1.4).sin() * r.height() * 0.22)).collect();
-                p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, c)));
-            })
-            .clicked()
-            {
-                self.color_views[5] = !self.color_views[5];
             }
         });
         if self.color_views[0] {
@@ -9703,9 +9688,8 @@ app.open_canvas_dialog(d == "resolution")
             let x0 = rect.left() + 3.0 + depth as f32 * 10.0;
             let eye = Rect::from_min_size(Pos2::new(x0, rect.top() + 3.0), Vec2::new(18.0, 17.0));
             p.rect_stroke(eye, 0.0, egui::Stroke::new(1.0_f32, sai_ui::border()));
-            if visible {
-                sai_ui::glyph(p, eye.shrink(2.0), sai_ui::ink(), "eye");
-            }
+            let eye_icon = if visible { "eye" } else { "eye_off" };
+            sai_ui::glyph(p, eye.shrink(2.0), Color32::WHITE, eye_icon);
             if is_folder && self.doc.layer(path).is_some_and(|l| l.marked) {
                 // отметка папки — уголок в окошке глаза
                 let c = eye.right_top();
@@ -10655,12 +10639,39 @@ app.open_canvas_dialog(d == "resolution")
         }
     }
 
-    /// ??????? ????? ???????? ???????.
-    fn gesture_centroid(touches: &[(u64, egui::Pos2)]) -> egui::Pos2 {
-        if touches.is_empty() { return egui::Pos2::ZERO; }
-        let mut sum = egui::Vec2::ZERO;
-        for (_, p) in touches { sum += p.to_vec2(); }
-        (sum / touches.len() as f32).to_pos2()
+    #[cfg(target_os = "android")]
+    fn touch_tool(id: u64) -> touch_gesture::TouchTool {
+        use winit::platform::android::ToolKind;
+        match winit::platform::android::pen_pointer_state(id as i32).map(|s| s.tool) {
+            Some(ToolKind::Stylus) => touch_gesture::TouchTool::Stylus,
+            Some(ToolKind::Eraser) => touch_gesture::TouchTool::Eraser,
+            Some(ToolKind::Finger) => touch_gesture::TouchTool::Finger,
+            _ => touch_gesture::TouchTool::Finger,
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn touch_tool(_id: u64) -> touch_gesture::TouchTool {
+        touch_gesture::TouchTool::Finger
+    }
+
+    fn cancel_active_stroke(&mut self) {
+        self.pending_points.clear();
+        self.smoother.finish();
+        self.pending_start = None;
+        self.shift_lock = None;
+        self.stroke_by_touch = false;
+        if let Some(live) = self.live.take() {
+            let keys = self.doc.live_cancel(live);
+            self.invalidate(keys);
+        }
+        if self.line_stroke.take().is_some() {}
+        if let Some((_, orig, target)) = self.mask_stroke.take() {
+            let path = self.selected.clone();
+            let keys = self.doc.mask_stroke_preview(&path, &orig.hide, &orig.hide, target);
+            self.invalidate(keys);
+        }
+        if self.sel_stroke.take().is_some() {}
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui) {
@@ -10769,89 +10780,91 @@ app.open_canvas_dialog(d == "resolution")
             zoom_delta = 1.0;
             pressed = false;
         }
+        self.gesture_fsm.set_settings(self.gesture_mode, self.gesture_rotation);
         let now = ui.input(|i| i.time);
+        let mut cancel_touch_stroke = false;
+        let mut pan_zoom_updates: Vec<touch_gesture::PanZoomUpdate> = Vec::new();
+        let mut taps: Vec<usize> = Vec::new();
+        self.gesture_pan_zoom = false;
+
         for (id, phase, pos, force) in &touches {
-            match phase {
-                egui::TouchPhase::Start => {
-                    if self.gesture_touches.is_empty() {
-                        self.gesture_time = now;
-                        self.gesture_moved = false;
-                        self.gesture_max = 0;
-                        self.gesture_prev = None;
+            let tool = Self::touch_tool(*id);
+            let gphase = match phase {
+                egui::TouchPhase::Start => touch_gesture::GesturePhase::Start,
+                egui::TouchPhase::Move => touch_gesture::GesturePhase::Move,
+                egui::TouchPhase::End => touch_gesture::GesturePhase::End,
+                egui::TouchPhase::Cancel => touch_gesture::GesturePhase::Cancel,
+            };
+
+            if tool.is_stylus() {
+                match phase {
+                    egui::TouchPhase::Start | egui::TouchPhase::Move => {
+                        self.stylus_touches.insert(*id);
+                        self.touch_down = true;
+                        if let Some(f) = force { self.touch_force = Some(f.clamp(0.0, 1.0)); }
                     }
-                    self.gesture_touches.retain(|(i, _)| i != id);
-                    self.gesture_touches.push((*id, *pos));
-                    self.gesture_max = self.gesture_max.max(self.gesture_touches.len());
-                    self.gesture_centroid0 = Self::gesture_centroid(&self.gesture_touches);
+                    egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                        self.stylus_touches.remove(id);
+                        self.touch_down = !self.stylus_touches.is_empty() || self.gesture_fsm.finger_count() > 0;
+                    }
+                }
+                continue;
+            }
+
+            match phase {
+                egui::TouchPhase::Start | egui::TouchPhase::Move => {
                     self.touch_down = true;
                     if let Some(f) = force { self.touch_force = Some(f.clamp(0.0, 1.0)); }
                 }
-                egui::TouchPhase::Move => {
-                    if let Some(t) = self.gesture_touches.iter_mut().find(|(i, _)| i == id) { t.1 = *pos; }
-                    else { self.gesture_touches.push((*id, *pos)); }
-                    if (Self::gesture_centroid(&self.gesture_touches) - self.gesture_centroid0).length() > 12.0 {
-                        self.gesture_moved = true;
-                    }
-                    self.touch_down = true;
-                    match force {
-                        Some(f) => self.touch_force = Some(f.clamp(0.0, 1.0)),
-                        None if self.touch_force.is_some() => self.touch_force = Some(0.0),
-                        None => {}
-                    }
-                }
                 egui::TouchPhase::End | egui::TouchPhase::Cancel => {
-                    self.gesture_touches.retain(|(i, _)| i != id);
-                    self.touch_down = !self.gesture_touches.is_empty();
-                    if self.gesture_touches.is_empty() {
-                        // ??? ? Ibis: ???????? ??? ????? ???????? ? ??????, ????? ? ???????.
-                        if now - self.gesture_time < 0.35 && !self.gesture_moved {
-                            match self.gesture_max {
-                                2 => self.undo(),
-                                3 => self.redo(),
-                                _ => {}
-                            }
-                        }
-                        self.gesture_max = 0;
-                        self.gesture_prev = None;
-                    }
+                    self.touch_down = !self.stylus_touches.is_empty() || self.gesture_fsm.finger_count() > 1;
                 }
             }
+
+            let action = self.gesture_fsm.handle(touch_gesture::TouchSample {
+                id: *id,
+                pos: *pos,
+                force: *force,
+                tool,
+                phase: gphase,
+                time: now,
+            });
+            match action {
+                touch_gesture::GestureAction::None => {}
+                touch_gesture::GestureAction::CancelFingerStroke => cancel_touch_stroke = true,
+                touch_gesture::GestureAction::PanZoom(u) => pan_zoom_updates.push(u),
+                touch_gesture::GestureAction::Tap(t) => taps.push(t.fingers),
+            }
         }
-        // ????? ??? ? Ibis Paint: ??? ?????? ? ????????, ??????? ? ??????? ?????? ?????? ?????.
-        if self.gesture_touches.len() >= 2 {
-            let a = self.gesture_touches[0].1;
-            let b = self.gesture_touches[1].1;
-            let center = a + (b - a) / 2.0;
-            let dist = ((b - a).length() / 2.0).max(1.0);
-            let angle = (b - a).angle();
-            if let Some((pc, pd, pa)) = self.gesture_prev {
-                let mut da = angle - pa;
-                while da > std::f32::consts::PI { da -= std::f32::consts::TAU; }
-                while da < -std::f32::consts::PI { da += std::f32::consts::TAU; }
-                let scale = (dist / pd).clamp(0.25, 4.0);
-                // ????? ?????? ??? ??????? ??????? ????? ?????? ????????? ??? ????? ???????.
-                let anchor = ViewXf::new(rect, self.zoom, self.offset, self.view_angle, self.view_flip).to_canvas(pc);
-                let zoom = (self.zoom * scale).clamp(0.02, 32.0);
-                let mut angle = self.view_angle + da;
+
+        if cancel_touch_stroke {
+            self.cancel_active_stroke();
+        }
+        if !pan_zoom_updates.is_empty() {
+            self.gesture_pan_zoom = true;
+            for u in pan_zoom_updates {
+                let anchor = ViewXf::new(rect, self.zoom, self.offset, self.view_angle, self.view_flip).to_canvas(u.center - u.pan_delta);
+                let zoom = (self.zoom * u.zoom).clamp(0.02, 32.0);
+                let mut angle = self.view_angle + u.angle_delta;
                 while angle > std::f32::consts::PI { angle -= std::f32::consts::TAU; }
                 while angle <= -std::f32::consts::PI { angle += std::f32::consts::TAU; }
                 let vx = ViewXf::new(rect, zoom, Vec2::ZERO, angle, self.view_flip);
-                let center_new = anchor - vx.vec_to_canvas(center - rect.center());
+                let center_new = anchor - vx.vec_to_canvas(u.center - rect.center());
                 self.zoom = zoom;
                 self.view_angle = angle;
                 self.offset = center_new - rect.size() / 2.0 / zoom;
             }
-            self.gesture_prev = Some((center, dist, angle));
-            // ????? ?????, ??????? ?????? ???????, ?????????? ? ??? ?????????, ? ?? ?????????.
-            if self.live.is_some() { self.live = None; }
-            if self.line_stroke.is_some() { self.line_stroke = None; }
-            if self.sel_stroke.is_some() { self.sel_stroke = None; }
-            if self.mask_stroke.is_some() { self.mask_stroke = None; }
             pressed = false;
             released = false;
             moves.clear();
-        } else {
-            self.gesture_prev = None;
+        }
+        for fingers in taps {
+            if self.gesture_pan_zoom { break; }
+            match fingers {
+                2 => self.undo(),
+                3 => self.redo(),
+                _ => {}
+            }
         }
         if let Some(pos) = pointer.filter(|p| rect.contains(*p)) {
             let factor = if zoom_delta != 1.0 {
@@ -10869,7 +10882,19 @@ app.open_canvas_dialog(d == "resolution")
             }
         }
         // ???? ????? ??????? ????? ?????? ?????????, ???? ???????? ?????? ??????? ? ??????.
-        let finger_pan = self.touch_pan_finger && self.gesture_touches.len() == 1;
+        let finger_count = self.gesture_fsm.finger_count();
+        let stylus_active = !self.stylus_touches.is_empty();
+        let gesture_mode = self.gesture_fsm.mode();
+        let in_touch_gesture = matches!(
+            gesture_mode,
+            touch_gesture::GestureMode::PanZoom | touch_gesture::GestureMode::Cooldown
+        );
+        let finger_pan = (self.touch_pan_finger && finger_count == 1 && !in_touch_gesture)
+            || (in_touch_gesture && finger_count > 0);
+        // Палец не должен рисовать, если включён one-finger pan или идёт жест/кулдаун.
+        let block_finger_draw = !stylus_active
+            && finger_count > 0
+            && (self.touch_pan_finger || in_touch_gesture);
         if finger_pan {
             pressed = false; released = false; moves.clear();
         }
@@ -11152,21 +11177,25 @@ app.open_canvas_dialog(d == "resolution")
                     pressure,
                 }
             };
-            if pressed && response.hovered() && self.below_min {
+            let has_active_stroke = self.live.is_some() || self.sel_stroke.is_some() || self.mask_stroke.is_some() || self.line_stroke.is_some() || self.line_edit.is_some() || self.shape_drag.is_some() || self.shape_node.is_some();
+            let block_draw_start = block_finger_draw;
+            if pressed && response.hovered() && self.below_min && !block_draw_start {
                 // слабее «минимального нажима» — ждать, пока нажмут сильнее
                 self.pending_start = Some(eraser_end);
             } else if self.line_plot.is_some() && response.double_clicked() {
                 self.finish_plot();
-            } else if pressed && response.hovered() {
+            } else if pressed && response.hovered() && !block_draw_start {
                 if let Some(pos) = pointer {
                     self.raw_last = Some((pos, pressure));
                     self.begin_stroke(point(pos, self.zoom, self.offset), eraser_end);
                 }
             } else if let (Some(er), false, Some(pos)) = (self.pending_start, self.below_min, pointer) {
-                self.pending_start = None;
-                self.raw_last = Some((pos, pressure));
-                self.begin_stroke(point(pos, self.zoom, self.offset), er);
-            } else if self.live.is_some() || self.sel_stroke.is_some() || self.mask_stroke.is_some() || self.line_stroke.is_some() || self.line_edit.is_some() || self.shape_drag.is_some() || self.shape_node.is_some() {
+                if !block_draw_start {
+                    self.pending_start = None;
+                    self.raw_last = Some((pos, pressure));
+                    self.begin_stroke(point(pos, self.zoom, self.offset), er);
+                }
+            } else if has_active_stroke {
                 // Сглаживание SAI — среднее последних N точек пера, а планшет шлёт их с постоянной
                 // частотой. Windows склеивает движения, пока кадр занят (тяжёлые кисти), — точек
                 // меньше, и то же N сглаживает сильнее. Поэтому точки кадра дополняются до 240 в
@@ -13996,7 +14025,10 @@ impl eframe::App for PaintApp {
         if (ctx.zoom_factor() - self.win.ui_scale).abs() > 0.001 {
             ctx.set_zoom_factor(self.win.ui_scale);
         }
-        let side = |right: bool, id: &'static str| if right { egui::SidePanel::right(id) } else { egui::SidePanel::left(id) };
+        let side = |right: bool, id: &'static str| {
+            let p = if right { egui::SidePanel::right(id) } else { egui::SidePanel::left(id) };
+            p.show_separator_line(false)
+        };
         let docked = self.win.dock && !self.win.panels_hidden;
         if !self.win.panels_hidden {
             let full = self.win.show;

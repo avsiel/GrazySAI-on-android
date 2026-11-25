@@ -75,15 +75,17 @@ use crate::window::{Window, WindowAttributes};
 
 use self::activity::{AndroidApp, ConfigurationRef, Rect};
 
-/// GrazySAI: данные пера, которые Android передаёт в `MotionEvent`, но стандартный
-/// `WindowEvent::Touch` не содержит (наклон, направление, кнопки, тип инструмента).
-///
-/// Возвращает состояние последнего события; вызывается из `egui` в момент обработки
-/// `Event::Touch`, поэтому соответствует текущему прикосновению.
-pub use crate::platform_impl::PenState;
+/// GrazySAI: данные пера/инструмента из Android MotionEvent, теряемые в `WindowEvent::Touch`.
+pub use crate::platform_impl::{PenState, PointerState, ToolKind};
 
+/// Последний глобальный снимок (совместимость).
 pub fn pen_state() -> PenState {
     crate::platform_impl::pen_state()
+}
+
+/// Снимок состояния конкретного Android pointer.
+pub fn pen_pointer_state(pointer_id: i32) -> Option<PointerState> {
+    crate::platform_impl::pen_pointer_state(pointer_id)
 }
 
 /// Additional methods on [`EventLoop`] that are specific to Android.

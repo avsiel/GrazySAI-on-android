@@ -26,13 +26,18 @@ use crate::window::{
 };
 
 mod keycodes;
-// GrazySAI: наклон и кнопки пера, теряемые при преобразовании MotionEvent в Touch.
+// GrazySAI: наклон/кнопки/тип инструмента, теряемые при преобразовании MotionEvent в Touch.
 mod pen;
-pub use pen::PenState;
+pub use pen::{PenState, PointerState, ToolKind};
 
-/// GrazySAI: снимок состояния пера (наклон, кнопки) из последнего MotionEvent.
+/// GrazySAI: снимок состояния пера (совместимость).
 pub fn pen_state() -> PenState {
     pen::state()
+}
+
+/// GrazySAI: снимок состояния конкретного Android pointer.
+pub fn pen_pointer_state(pointer_id: i32) -> Option<PointerState> {
+    pen::pointer_state(pointer_id)
 }
 
 pub(crate) use crate::cursor::{
@@ -410,8 +415,7 @@ impl<T: 'static> EventLoop<T> {
                         };
 
                     for pointer in pointers {
-                        // GrazySAI: запоминаем наклон/кнопки до того, как winit превратит
-                        // событие в egui::Touch (где есть только координаты и force).
+                        // GrazySAI: запоминаем наклон/кнопки/тип инструмента до конвертации в Touch.
                         pen::update(motion_event, &pointer);
                         let location =
                             PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
@@ -430,6 +434,13 @@ impl<T: 'static> EventLoop<T> {
                             }),
                         };
                         callback(event, self.window_target());
+
+                        if matches!(phase, event::TouchPhase::Ended | event::TouchPhase::Cancelled) {
+                            pen::remove(pointer.pointer_id());
+                        }
+                    }
+                    if matches!(phase, event::TouchPhase::Cancelled) {
+                        pen::clear();
                     }
                 }
             },
