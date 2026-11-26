@@ -41,14 +41,22 @@ fn raster_bytes(name: &str) -> Option<&'static [u8]> {
         "hardness" => include_bytes!("../assets/icons/hardness.rgba"),
         "marker" => include_bytes!("../assets/icons/marker.rgba"),
         "brush_shape" => include_bytes!("../assets/icons/brush_shape.rgba"),
+        "scatter" | "scatter_off" | "scatter_alt" => include_bytes!("../assets/icons/scatter.rgba"),
+        "shape" => include_bytes!("../assets/icons/shape.rgba"),
         "rotate" => include_bytes!("../assets/icons/rotate.rgba"),
         "hand" => include_bytes!("../assets/icons/hand.rgba"),
+        "move" => include_bytes!("../assets/icons/move.rgba"),
         "undo" => include_bytes!("../assets/icons/undo.rgba"),
         "redo" => include_bytes!("../assets/icons/redo.rgba"),
         "minus" => include_bytes!("../assets/icons/minus.rgba"),
         "plus" => include_bytes!("../assets/icons/plus.rgba"),
         "ccw" => include_bytes!("../assets/icons/ccw.rgba"),
         "cw" => include_bytes!("../assets/icons/cw.rgba"),
+        "reset_view" => include_bytes!("../assets/icons/reset_view.rgba"),
+        "mirror_h" => include_bytes!("../assets/icons/mirror_h.rgba"),
+        "swap_colors" => include_bytes!("../assets/icons/swap_colors.rgba"),
+        "deselect" => include_bytes!("../assets/icons/deselect.rgba"),
+        "select_clear" => include_bytes!("../assets/icons/select_clear.rgba"),
         "eye" => include_bytes!("../assets/icons/eye.rgba"),
         "eye_off" => include_bytes!("../assets/icons/eye_off.rgba"),
         "clip" => include_bytes!("../assets/icons/clip.rgba"),
@@ -58,8 +66,23 @@ fn raster_bytes(name: &str) -> Option<&'static [u8]> {
         "cv_mixer" => include_bytes!("../assets/icons/cv_mixer.rgba"),
         "cv_swatches" => include_bytes!("../assets/icons/cv_swatches.rgba"),
         "cv_scratch" => include_bytes!("../assets/icons/cv_scratch.rgba"),
-        "lock" | "lock_alpha" | "lock_paint" | "lock_all" => include_bytes!("../assets/icons/lock.rgba"),
+        "lock" => include_bytes!("../assets/icons/lock.rgba"),
+        "lock_alpha" => include_bytes!("../assets/icons/lock_alpha.rgba"),
+        "lock_paint" => include_bytes!("../assets/icons/lock_paint.rgba"),
+        "lock_move" => include_bytes!("../assets/icons/lock_move.rgba"),
+        "lock_all" => include_bytes!("../assets/icons/lock_all.rgba"),
         "folder" | "new_folder" => include_bytes!("../assets/icons/folder.rgba"),
+        "new_layer" => include_bytes!("../assets/icons/new_layer.rgba"),
+        "new_raster" => include_bytes!("../assets/icons/new_raster.rgba"),
+        "new_vector" => include_bytes!("../assets/icons/new_vector.rgba"),
+        "new_folder_layer" => include_bytes!("../assets/icons/new_folder_layer.rgba"),
+        "rulers_menu" => include_bytes!("../assets/icons/rulers_menu.rgba"),
+        "layer_menu" => include_bytes!("../assets/icons/layer_menu.rgba"),
+        "merge_down" => include_bytes!("../assets/icons/merge_down.rgba"),
+        "new_layer_add" => include_bytes!("../assets/icons/new_layer_add.rgba"),
+        "clear_layer" => include_bytes!("../assets/icons/clear_layer.rgba"),
+        "delete_layer" => include_bytes!("../assets/icons/delete_layer.rgba"),
+        "duplicate_layer" => include_bytes!("../assets/icons/duplicate_layer.rgba"),
         _ => return None,
     })
 }
@@ -89,13 +112,13 @@ fn draw_raster(p: &Painter, r: Rect, c: Color32, name: &str) -> bool {
         return false;
     };
     let tint = if c == dim() {
-        if matches!(name, "plus" | "minus" | "ccw" | "cw" | "rotate" | "undo" | "redo") {
+        if matches!(name, "plus" | "minus" | "ccw" | "cw" | "undo" | "redo") {
             Color32::from_rgba_unmultiplied(20, 20, 20, 90)
         } else {
             Color32::from_white_alpha(96)
         }
-    } else if matches!(name, "plus" | "minus" | "ccw" | "cw" | "rotate" | "undo" | "redo") {
-        // эти PNG из SAI белые — не зависим от переданного цвета, всегда берём контрастную типографику
+    } else if matches!(name, "plus" | "minus" | "ccw" | "cw" | "undo" | "redo" | "reset_view" | "deselect" | "select_clear") {
+        // эти PNG из SAI белые/светлые — не зависим от переданного цвета, всегда берём контрастную типографику
         gray(20)
     } else {
         Color32::WHITE

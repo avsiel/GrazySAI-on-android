@@ -6759,10 +6759,10 @@ app.open_canvas_dialog(d == "resolution")
                             self.rotate_view(step);
                         }
                     }
-                    if sai_ui::icon_button(ui, b, self.view_flip, true, tr("Зеркало вида"), |p, r, c| sai_ui::glyph(p, r, c, "flip")).clicked() {
+                    if sai_ui::icon_button(ui, b, self.view_flip, true, tr("Зеркало вида"), |p, r, c| sai_ui::glyph(p, r, c, "mirror_h")).clicked() {
                         self.view_flip = !self.view_flip;
                     }
-                    if ui.small_button(tr("Сбросить положение")).clicked() {
+                    if sai_ui::icon_button(ui, b, false, true, tr("Сбросить положение"), |p, r, c| sai_ui::glyph(p, r, c, "reset_view")).clicked() {
                         self.reset_view_position();
                     }
                 });
@@ -8439,8 +8439,8 @@ app.open_canvas_dialog(d == "resolution")
             if sai_ui::icon_button(ui, b, false, has_sel, &keys::hint(tr("Снять выделение (Ctrl+D)")), |p, r, c| sai_ui::glyph(p, r, c, "deselect")).clicked() {
                 self.deselect();
             }
-            if sai_ui::icon_button(ui, b, false, true, tr("Инвертировать выделение"), |p, r, c| sai_ui::glyph(p, r, c, "invert")).clicked() {
-                self.invert_selection();
+            if sai_ui::icon_button(ui, b, false, has_sel, tr("Снять выделение"), |p, r, c| sai_ui::glyph(p, r, c, "select_clear")).clicked() {
+                self.deselect();
             }
             if sai_ui::icon_button(ui, b, self.show_selection, true, &keys::hint(tr("Показать выделение (Ctrl+H)")), |p, r, c| sai_ui::glyph(p, r, c, "eye")).clicked() {
                 self.show_selection = !self.show_selection;
@@ -8516,7 +8516,7 @@ app.open_canvas_dialog(d == "resolution")
                 self.view_flip = !self.view_flip;
             }
             ui.separator();
-            ui.label(tr("Сглаживание"));
+            if sai_ui::icon_button(ui, b, false, true, tr("Stabilizer"), |p, r, c| sai_ui::glyph(p, r, c, "stabilizer")).clicked() {}
             egui::ComboBox::from_id_salt("stab")
                 .selected_text(self.stabilizer.label())
                 .width(44.0)
@@ -8526,13 +8526,6 @@ app.open_canvas_dialog(d == "resolution")
                         ui.selectable_value(&mut self.stabilizer, v, v.label());
                     }
                 });
-            if sai_ui::icon_button(ui, b, self.straight, true, tr("Прямая линия: каждый штрих — прямая (Shift + нажатие — прямая от конца прошлого штриха)"), |p, r, c| sai_ui::glyph(p, r, c, "line")).clicked() {
-                self.straight = !self.straight;
-            }
-            if sai_ui::icon_button(ui, b, self.ruler.ignore, self.ruler.visible, tr("Не замечать линейку"), |p, r, c| {
-                sai_ui::glyph(p, r, c, "ruler")
-            })
-            .clicked()
             {
                 self.ruler.ignore = !self.ruler.ignore;
             }
@@ -8723,8 +8716,8 @@ app.open_canvas_dialog(d == "resolution")
                             self.tool = tool;
                         }
                     }
-                    if sai_ui::icon_button(ui, b, self.tool == Tool::Fill, true, &keys::hint(tr("Заливка (Alt+Delete — залить выделенное)")), |p, r, c| sai_ui::glyph(p, r, c, "bucket")).clicked() {
-                        self.tool = Tool::Fill;
+                    if sai_ui::icon_button(ui, b, false, true, tr("Фигуры"), |p, r, c| sai_ui::glyph(p, r, c, "shape")).clicked() {
+                        self.tool = Tool::Brush;
                     }
                     if sai_ui::icon_button(ui, b, self.tool == Tool::Text, true, tr("Текст: щелчок — новая надпись, по текстовому слою — правка"), |p, r, c| sai_ui::glyph(p, r, c, "text")).clicked() {
                         self.tool = Tool::Text;
@@ -8799,7 +8792,7 @@ app.open_canvas_dialog(d == "resolution")
             }
             p.rect_stroke(fore, 0.0, egui::Stroke::new(1.0_f32, sai_ui::border()));
             let swap = Rect::from_min_size(rect.min + Vec2::new(34.0, 2.0), Vec2::splat(14.0));
-            sai_ui::glyph(p, swap, sai_ui::ink(), "cw");
+            sai_ui::glyph(p, swap, sai_ui::ink(), "swap_colors");
             let clear = Rect::from_min_size(rect.min + Vec2::new(2.0, 34.0), Vec2::splat(12.0));
             sai_ui::checker(p, clear, 3.0);
             if self.transparent {
@@ -8809,6 +8802,7 @@ app.open_canvas_dialog(d == "resolution")
             if response.clicked() && at.is_some_and(|q| swap.expand(2.0).contains(q)) {
                 self.swap_colors();
             }
+            sai_ui::glyph(ui.painter(), swap.shrink(1.0), sai_ui::dim(), "swap_colors");
             // клетка — «прозрачный цвет» (как в SAI)
             if response.clicked() && at.is_some_and(|q| clear.expand(2.0).contains(q)) {
                 self.transparent = !self.transparent;
@@ -10112,67 +10106,46 @@ app.open_canvas_dialog(d == "resolution")
         ui.add_space(3.0);
         let b2 = Vec2::splat(22.0);
         ui.horizontal(|ui| {
-            if sai_ui::icon_button(ui, b2, false, true, tr("Новый слой"), |p, r, c| {
-                sai_ui::glyph(p, r, c, "new_layer")
-            })
-            .clicked()
-            {
-                self.add_layer(false);
-            }
-            if sai_ui::icon_button(ui, b2, false, true, tr("Новый слой контура"), |p, r, c| sai_ui::glyph(p, r, c, "new_linework")).clicked() {
-                self.add_linework_layer();
-            }
-            if sai_ui::icon_button(ui, b2, false, true, tr("Новая папка"), |p, r, c| {
-                sai_ui::glyph(p, r, c, "new_folder")
-            })
-            .clicked()
-            {
-                self.add_layer(true);
-            }
-            // как в SAI: кнопка раскрывает выбор числа точек схода
-            let persp = self.ruler.visible && matches!(self.ruler.kind, ruler::Kind::Perspective(_));
-            let resp = sai_ui::icon_button(ui, b2, persp, true, tr("Линейка перспективы"), |p, r, c| sai_ui::glyph(p, r, c, "ruler"));
-            let popup = ui.make_persistent_id("persp_popup");
-            if resp.clicked() {
-                ui.memory_mut(|m| m.toggle_popup(popup));
-            }
-            egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                ui.set_min_width(170.0);
-                for n in 1..=3u8 {
-                    let label = match n {
-                        1 => tr("Перспектива: 1 точка"),
-                        2 => tr("Перспектива: 2 точки"),
-                        _ => tr("Перспектива: 3 точки"),
-                    };
-                    if ui.selectable_label(persp && self.ruler.kind == ruler::Kind::Perspective(n), label).clicked() {
-                        self.show_perspective(n);
+            let row1 = [
+                ("new_raster", tr("New raster layer")),
+                ("new_vector", tr("New vector layer")),
+                ("new_folder_layer", tr("New folder")),
+                ("rulers_menu", tr("Rulers")),
+                ("layer_menu", tr("Layer menu")),
+            ];
+            for (g, tip) in row1 {
+                let resp = sai_ui::icon_button(ui, b2, false, true, tip, |p, r, c| sai_ui::glyph(p, r, c, g));
+                if resp.clicked() {
+                    match g {
+                        "new_raster" => self.add_layer(false),
+                        "new_vector" => self.add_linework_layer(),
+                        "new_folder_layer" => self.add_layer(true),
+                        "rulers_menu" => { self.show_perspective(1); },
+                        _ => {}
                     }
                 }
-                if persp && ui.button(tr("Спрятать линейку")).clicked() {
-                    self.ruler.visible = false;
-                }
-            });
-            let masked = self.doc.layer(&self.selected).is_some_and(|l| l.mask.is_some());
-            if sai_ui::icon_button(ui, b2, false, !masked, tr("Новая маска слоя"), |p, r, c| sai_ui::glyph(p, r, c, "mask")).clicked() {
-                self.mask_command(0);
             }
         });
         ui.horizontal(|ui| {
-            for (g, tip, action) in [
-                ("down", &keys::hint(tr("Перенести на нижний (F)")), LayerAction::Transfer),
-                ("merge", &keys::hint(tr("Слить с нижним (Ctrl+E)")), LayerAction::Merge),
-                ("clear", &keys::hint(tr("Очистить слой (Delete)")), LayerAction::Clear),
-                ("delete", &tr("Удалить слой").to_string(), LayerAction::Delete),
-            ] {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let row2 = [
+                ("merge_down", tr("Merge down")),
+                ("new_layer_add", tr("New layer")),
+                ("clear_layer", tr("Clear layer")),
+                ("delete_layer", tr("Delete layer")),
+                ("duplicate_layer", tr("Duplicate layer")),
+            ];
+            for (g, tip) in row2 {
                 if sai_ui::icon_button(ui, b2, false, true, tip, |p, r, c| sai_ui::glyph(p, r, c, g)).clicked() {
-                    self.layer_action(action);
+                    match g {
+                        "merge_down" => self.layer_action(LayerAction::Merge),
+                        "new_layer_add" => self.add_layer(false),
+                        "clear_layer" => self.layer_action(LayerAction::Clear),
+                        "delete_layer" => self.layer_action(LayerAction::Delete),
+                        "duplicate_layer" => self.layer_action(LayerAction::Duplicate),
+                        _ => {}
+                    }
                 }
-            }
-            if sai_ui::icon_button(ui, b2, false, true, tr("Слой выше"), |p, r, c| sai_ui::glyph(p, r, c, "up")).clicked() {
-                self.layer_action(LayerAction::Up);
-            }
-            if sai_ui::icon_button(ui, b2, false, true, tr("Слой ниже"), |p, r, c| sai_ui::glyph(p, r, c, "lower")).clicked() {
-                self.layer_action(LayerAction::Down);
             }
         });
         egui::Frame::none()
